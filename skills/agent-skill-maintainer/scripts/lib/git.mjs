@@ -61,11 +61,6 @@ const RELEASE_MAPPING_FIELDS = new Set([
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const GIT_NULL_PATH = process.platform === "win32" ? "NUL" : devNull;
 
-/** Compares canonical paths using the host platform's path semantics. */
-function sameCanonicalPath(first, second) {
-  return relative(first, second) === "" && relative(second, first) === "";
-}
-
 /** Validates a Git ref and rejects revision or option injection. */
 export function validateRef(ref, label = "ref") {
   if (
@@ -145,13 +140,15 @@ export function buildRepositorySnapshot(
     throw new Error("repository 必須是目錄");
   }
   const safeBaseRef = validateRef(baseRef, "base_ref");
-  const topLevel = realpathSync(
-    runGit(repositoryPath, ["rev-parse", "--show-toplevel"], {
+  const repositoryPrefix = runGit(
+    repositoryPath,
+    ["rev-parse", "--show-prefix"],
+    {
       readOnly: true,
       label: "Git 唯讀命令",
-    }).trim(),
-  );
-  if (!sameCanonicalPath(topLevel, repositoryPath)) {
+    },
+  ).trim();
+  if (repositoryPrefix !== "") {
     throw new Error("repository 必須指向 Git 根目錄");
   }
   const headCommit = runGit(repositoryPath, ["rev-parse", "HEAD"], {
