@@ -19,6 +19,7 @@ import {
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
 const REQUIRED_FILES = Object.freeze([
+  ".gitattributes",
   "LICENSE",
   "AGENTS.md",
   "README.md",

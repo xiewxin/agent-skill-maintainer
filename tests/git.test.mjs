@@ -100,6 +100,21 @@ test("repository snapshot uses merge base and hashes committed diff", () => {
   }
 });
 
+test("repository snapshot rejects a Git subdirectory", () => {
+  const root = mkdtempSync(join(tmpdir(), "maintainer-snapshot-root-"));
+  try {
+    initializeRepository(root);
+    const nested = join(root, "nested");
+    mkdirSync(nested);
+    assert.throws(
+      () => buildRepositorySnapshot(nested, { baseRef: "main" }),
+      /repository 必須指向 Git 根目錄/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("installed fingerprint is stable and detects drift", () => {
   const fixture = createIsolationFixture();
   try {

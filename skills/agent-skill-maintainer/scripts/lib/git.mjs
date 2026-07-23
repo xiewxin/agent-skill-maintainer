@@ -59,6 +59,7 @@ const RELEASE_MAPPING_FIELDS = new Set([
   "reason",
 ]);
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+const GIT_NULL_PATH = process.platform === "win32" ? "NUL" : devNull;
 
 /** Validates a Git ref and rejects revision or option injection. */
 export function validateRef(ref, label = "ref") {
@@ -81,7 +82,7 @@ function safeGitEnvironment({ readOnly = false } = {}) {
   const environment = { ...process.env };
   delete environment.GIT_EXTERNAL_DIFF;
   environment.GIT_CONFIG_NOSYSTEM = "1";
-  environment.GIT_CONFIG_GLOBAL = devNull;
+  environment.GIT_CONFIG_GLOBAL = GIT_NULL_PATH;
   environment.GIT_TERMINAL_PROMPT = "0";
   environment.GIT_PAGER = "cat";
   environment.LC_ALL = "C";
@@ -99,7 +100,7 @@ export function runGit(
 ) {
   const result = spawnSync(
     "git",
-    ["-c", `core.hooksPath=${devNull}`, ...arguments_],
+    ["-c", `core.hooksPath=${GIT_NULL_PATH}`, ...arguments_],
     {
       cwd: repository,
       env: safeGitEnvironment({ readOnly }),
@@ -139,13 +140,15 @@ export function buildRepositorySnapshot(
     throw new Error("repository 必須是目錄");
   }
   const safeBaseRef = validateRef(baseRef, "base_ref");
-  const topLevel = realpathSync(
-    runGit(repositoryPath, ["rev-parse", "--show-toplevel"], {
+  const repositoryPrefix = runGit(
+    repositoryPath,
+    ["rev-parse", "--show-prefix"],
+    {
       readOnly: true,
       label: "Git 唯讀命令",
-    }).trim(),
-  );
-  if (topLevel !== repositoryPath) {
+    },
+  ).trim();
+  if (repositoryPrefix !== "") {
     throw new Error("repository 必須指向 Git 根目錄");
   }
   const headCommit = runGit(repositoryPath, ["rev-parse", "HEAD"], {
