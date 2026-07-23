@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "profile_schema_version": 1,
+  "provider_id": "superpowers",
+  "role_type": "formal",
+  "version_detection": {
+    "kind": "filesystem",
+    "markers": [".codex/superpowers", "superpowers"],
+    "version_files": ["VERSION", "package.json"]
+  },
+  "tested_versions": [],
+  "last_verified_at": null,
+  "supported_platforms": [],
+  "capabilities": ["brainstorming", "planning", "test-driven-development", "review", "verification"],
+  "artifact_contracts": [
+    {"capability": "planning", "ownership": "provider", "discovery": "repository instructions or active plan"},
+    {"capability": "verification", "ownership": "provider", "discovery": "active workflow state"}
+  ],
+  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
+  "blocking": {"repository_required_failure": true}
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/optimization.schema.json",
+  "title": "Skill Optimization Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "feedback_ids", "intent_evidence", "problem_evidence", "owner", "scope", "closure", "minimum_change", "regression_case", "generalized_value", "confidence", "decision_status", "decision_reason"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "id": {"type": "string", "pattern": "OPT-[0-9]{3,}"},
+    "feedback_ids": {"type": "array", "items": {"type": "string"}},
+    "intent_evidence": {"type": "string", "minLength": 1},
+    "problem_evidence": {"type": "string", "minLength": 1},
+    "owner": {"type": "string", "minLength": 1},
+    "scope": {"type": "string", "minLength": 1},
+    "closure": {"type": "string", "minLength": 1},
+    "minimum_change": {"type": "string", "minLength": 1},
+    "regression_case": {"type": "string", "minLength": 1},
+    "generalized_value": {"type": "string", "minLength": 1},
+    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+    "decision_status": {"type": "string", "enum": ["accepted", "rejected", "deferred", "needs_evidence"]},
+    "decision_reason": {"type": "string", "minLength": 1}
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/provider-selection.schema.json",
+  "title": "Provider Selection Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "native_gap", "active", "inactive"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "native_gap": {"type": ["string", "null"]},
+    "active": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "role", "installed", "capability_gap", "owner", "support_status", "required_access", "version_evidence", "expected_benefit", "estimated_cost", "risk", "validation", "fallback"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "enum": ["main", "auxiliary", "repository-required"]},
+          "installed": {"type": "boolean"},
+          "capability_gap": {"type": "string", "minLength": 1},
+          "owner": {"type": "string", "minLength": 1},
+          "support_status": {"type": "string", "enum": ["verified", "compatible-read-only"]},
+          "required_access": {"type": "string", "enum": ["read-only", "commands"]},
+          "version_evidence": {"type": "string", "minLength": 1},
+          "expected_benefit": {"type": "string", "minLength": 1},
+          "estimated_cost": {"type": "string", "minLength": 1},
+          "risk": {"type": "string", "minLength": 1},
+          "validation": {"type": "string", "minLength": 1},
+          "fallback": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "role", "installed", "capability_gap", "owner", "support_status", "required_access", "inactive_reason"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "enum": ["main", "auxiliary", "repository-required"]},
+          "installed": {"type": "boolean"},
+          "capability_gap": {"type": ["string", "null"]},
+          "owner": {"type": ["string", "null"]},
+          "support_status": {"type": "string", "enum": ["verified", "compatible-read-only", "unsupported", "unavailable"]},
+          "required_access": {"type": "string", "enum": ["read-only", "commands"]},
+          "inactive_reason": {"type": "string", "enum": ["unavailable", "no_capability_gap", "unsupported", "commands_not_verified"]}
+        }
+      }
+    }
+  }
+}

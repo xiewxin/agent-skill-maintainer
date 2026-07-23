@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "profile_schema_version": 1,
+  "provider_id": "skill-creator",
+  "role_type": "auxiliary",
+  "version_detection": {
+    "kind": "skill-metadata",
+    "markers": ["skill-creator/SKILL.md"],
+    "version_files": []
+  },
+  "tested_versions": [],
+  "last_verified_at": null,
+  "supported_platforms": [],
+  "capabilities": ["skill-structure", "trigger-design", "baseline-evaluation", "forward-evaluation"],
+  "artifact_contracts": [
+    {"capability": "skill-structure", "ownership": "auxiliary", "discovery": "SKILL.md and agents metadata"},
+    {"capability": "forward-evaluation", "ownership": "auxiliary", "discovery": "candidate evaluation artifacts"}
+  ],
+  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
+  "blocking": {"repository_required_failure": false}
+}

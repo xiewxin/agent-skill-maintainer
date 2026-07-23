@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/repository-snapshot.schema.json",
+  "title": "Read-only Repository Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "base_ref", "merge_base", "head_commit", "diff_hash", "changed_files", "process_artifact_prefixes"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "base_ref": {"type": "string", "minLength": 1},
+    "merge_base": {"type": "string", "minLength": 1},
+    "head_commit": {"type": "string", "minLength": 1},
+    "diff_hash": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "process_artifact_prefixes": {"type": "array", "items": {"type": "string"}}
+  }
+}

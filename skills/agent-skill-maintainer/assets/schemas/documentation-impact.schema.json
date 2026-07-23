@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/documentation-impact.schema.json",
+  "title": "Agent Guidance Impact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "changed_guides", "root_index_action", "contract_preserved", "reason"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "status": {"type": "string", "enum": ["updated", "not-required", "upstream-follow-up"]},
+    "changed_guides": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "root_index_action": {"type": "string", "enum": ["updated", "verified-current", "not-applicable", "upstream-follow-up"]},
+    "contract_preserved": {"type": "boolean"},
+    "reason": {"type": "string", "minLength": 1}
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/approval.schema.json",
+  "title": "State-bound Action Approval",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action", "run_id", "binding_id", "relationship", "repository", "head_commit", "diff_hash", "process_artifact_prefixes", "approved_opt_ids", "optimizations_hash", "fingerprint"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "action": {"type": "string", "enum": ["implementation", "pr_create", "pr_update", "merge", "release", "local_update", "cleanup"]},
+    "run_id": {"type": "string", "minLength": 1},
+    "binding_id": {"type": "string", "minLength": 1},
+    "relationship": {"type": "string", "enum": ["managed", "contribute"]},
+    "repository": {"type": "string", "minLength": 1},
+    "head_commit": {"type": "string", "minLength": 1},
+    "diff_hash": {"type": "string", "minLength": 1},
+    "process_artifact_prefixes": {"type": "array", "items": {"type": "string"}},
+    "approved_opt_ids": {"type": "array", "items": {"type": "string"}},
+    "optimizations_hash": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "profile_schema_version": 1,
+  "provider_id": "bmad",
+  "role_type": "formal",
+  "version_detection": {
+    "kind": "filesystem",
+    "markers": [".bmad-core", "_bmad"],
+    "version_files": [".bmad-core/core-config.yaml", "_bmad/_config/manifest.yaml"]
+  },
+  "tested_versions": [],
+  "last_verified_at": null,
+  "supported_platforms": [],
+  "capabilities": ["quick-flow", "product-requirements", "architecture", "story"],
+  "artifact_contracts": [
+    {"capability": "product-requirements", "ownership": "provider", "discovery": "repository-defined PRD artifact"},
+    {"capability": "architecture", "ownership": "provider", "discovery": "repository-defined architecture artifact"},
+    {"capability": "story", "ownership": "provider", "discovery": "repository-defined story artifact"}
+  ],
+  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
+  "blocking": {"repository_required_failure": true}
+}

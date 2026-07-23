@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "case_id": "REAL-USAGE-001",
+  "evidence_kind": "redacted-real-usage",
+  "target": {
+    "skill": "ai-development-workflow",
+    "repository": "xiewxin/ai-development-workflow-skill",
+    "version": "v1.2.0"
+  },
+  "evidence": [
+    {
+      "schema_version": 1,
+      "id": "EV-001",
+      "source_type": "current-run",
+      "source_ref": "sha256:redacted-plan-generation-observation",
+      "skill_version": "v1.2.0",
+      "redacted_summary": "A public-project plan exposed two defaults that were not required by the user or repository.",
+      "confidence": "high"
+    },
+    {
+      "schema_version": 1,
+      "id": "EV-002",
+      "source_type": "provided-file",
+      "source_ref": "public-release:v1.2.0/SKILL.md#language-policy",
+      "skill_version": "v1.2.0",
+      "redacted_summary": "The published Skill defaults interactions, artifacts, code comments, tests, logs, and internal errors to Traditional Chinese.",
+      "confidence": "high"
+    },
+    {
+      "schema_version": 1,
+      "id": "EV-003",
+      "source_type": "provided-file",
+      "source_ref": "public-release:v1.2.0/requirement-plan-template.md#ai-collaboration",
+      "skill_version": "v1.2.0",
+      "redacted_summary": "The published plan contract, template, and validator require an AI collaboration effectiveness section for every plan.",
+      "confidence": "high"
+    }
+  ],
+  "feedback": [
+    {
+      "schema_version": 1,
+      "id": "FB-001",
+      "target_skill": "ai-development-workflow",
+      "phenomenon": "Every requirement plan includes AI collaboration measurement even when a public project does not request it.",
+      "expected_behavior": "AI collaboration measurement should be disabled by default and enabled only by an explicit request or repository policy.",
+      "source_ids": [
+        "EV-001",
+        "EV-003"
+      ],
+      "skill_version": "v1.2.0",
+      "reproduction": "Confirmed from the published required-section list, default template, and publication validator.",
+      "missing_evidence": [],
+      "classification": "new-requirement",
+      "confidence": "high",
+      "provisional_owner": "ai-development-workflow"
+    },
+    {
+      "schema_version": 1,
+      "id": "FB-002",
+      "target_skill": "ai-development-workflow",
+      "phenomenon": "The Skill applies one fixed human-language default across interaction and target-repository artifacts.",
+      "expected_behavior": "Interaction should follow the user, while files and code should follow target-repository rules and nearby conventions.",
+      "source_ids": [
+        "EV-001",
+        "EV-002"
+      ],
+      "skill_version": "v1.2.0",
+      "reproduction": "Confirmed from the published language-policy section.",
+      "missing_evidence": [],
+      "classification": "new-requirement",
+      "confidence": "high",
+      "provisional_owner": "ai-development-workflow"
+    }
+  ],
+  "optimizations": [
+    {
+      "schema_version": 1,
+      "id": "OPT-001",
+      "feedback_ids": [
+        "FB-001"
+      ],
+      "intent_evidence": "The Skill is a general planning workflow; AI timing is an optional measurement concern rather than a requirement-plan prerequisite.",
+      "problem_evidence": "The released reference, template, validator, and timing gate currently make the section part of every full-flow plan.",
+      "owner": "ai-development-workflow",
+      "scope": "Requirement-plan section selection and reference timing activation.",
+      "closure": "Make the section and local timing opt-in, retain a reusable optional template, and update validator, tests, and public documentation.",
+      "minimum_change": "Keep the existing measurement capability but remove it from the default plan path.",
+      "regression_case": "A default plan omits the section; an explicitly enabled plan can still include and validate every measurement field.",
+      "generalized_value": "Reduces irrelevant output and local measurement work for public and non-metric-driven projects.",
+      "confidence": "high",
+      "decision_status": "accepted",
+      "decision_reason": "The user accepted an opt-in default while preserving the existing capability."
+    },
+    {
+      "schema_version": 1,
+      "id": "OPT-002",
+      "feedback_ids": [
+        "FB-002"
+      ],
+      "intent_evidence": "A repository-agnostic workflow must preserve the user's communication language and each target repository's conventions.",
+      "problem_evidence": "The released Skill currently applies Traditional Chinese as the default to both interaction and repository artifacts.",
+      "owner": "ai-development-workflow",
+      "scope": "Language selection for interaction, plans, tests, code comments, logs, errors, and fixed identifiers.",
+      "closure": "Separate interaction language from artifact language, define evidence priority, preserve identifiers, and add mixed-language regression scenarios.",
+      "minimum_change": "Replace the fixed default policy without translating existing public documentation or contracts.",
+      "regression_case": "Chinese and English users receive matching interaction language while target-repository files retain their documented conventions.",
+      "generalized_value": "Makes the public Skill usable across repositories without forcing unrelated language rewrites.",
+      "confidence": "high",
+      "decision_status": "accepted",
+      "decision_reason": "The user accepted the adaptive policy used by the maintainer design."
+    }
+  ]
+}

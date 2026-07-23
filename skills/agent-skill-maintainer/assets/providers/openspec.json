@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "profile_schema_version": 1,
+  "provider_id": "openspec",
+  "role_type": "formal",
+  "version_detection": {
+    "kind": "filesystem",
+    "markers": ["openspec"],
+    "version_files": ["openspec/project.md"]
+  },
+  "tested_versions": [],
+  "last_verified_at": null,
+  "supported_platforms": [],
+  "capabilities": ["proposal", "design", "task-decomposition", "spec-delta"],
+  "artifact_contracts": [
+    {"capability": "proposal", "ownership": "provider", "discovery": "openspec/changes/*/proposal.md"},
+    {"capability": "design", "ownership": "provider", "discovery": "openspec/changes/*/design.md"},
+    {"capability": "spec-delta", "ownership": "provider", "discovery": "openspec/changes/*/specs"}
+  ],
+  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
+  "blocking": {"repository_required_failure": true}
+}

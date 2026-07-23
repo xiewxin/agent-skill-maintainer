@@ -1,0 +1,14 @@
+{
+  "name": "agent-skill-maintainer",
+  "version": "0.0.0-preview",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node scripts/validate-publication.mjs",
+    "eval": "node evals/run-evals.mjs --suite all"
+  }
+}

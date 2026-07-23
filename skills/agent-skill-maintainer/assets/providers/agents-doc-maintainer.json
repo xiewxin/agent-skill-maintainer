@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "profile_schema_version": 1,
+  "provider_id": "agents-doc-maintainer",
+  "role_type": "auxiliary",
+  "version_detection": {
+    "kind": "skill-metadata",
+    "markers": ["agents-doc-maintainer/SKILL.md"],
+    "version_files": []
+  },
+  "tested_versions": [],
+  "last_verified_at": null,
+  "supported_platforms": [],
+  "capabilities": [
+    "agent-guidance-maintenance",
+    "root-module-placement",
+    "generated-contract-preservation",
+    "documentation-drift-validation"
+  ],
+  "artifact_contracts": [
+    {
+      "capability": "agent-guidance-maintenance",
+      "ownership": "auxiliary",
+      "discovery": "root or nested AGENTS.md and repository-linked detail guides"
+    },
+    {
+      "capability": "generated-contract-preservation",
+      "ownership": "auxiliary",
+      "discovery": "machine-owned marker, generator, template, or repository instruction"
+    }
+  ],
+  "command_policy": {
+    "default": "deny",
+    "allowed_when_verified": []
+  },
+  "fallback": {
+    "missing": "unavailable",
+    "unknown_version": "compatible-read-only",
+    "breaking": "unsupported"
+  },
+  "blocking": {
+    "repository_required_failure": false
+  }
+}

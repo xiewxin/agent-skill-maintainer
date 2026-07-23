@@ -1,0 +1,11 @@
+{
+  "default_branch": "main",
+  "ruleset_required": false,
+  "required_checks": true,
+  "force_push_blocked": true,
+  "branch_deletion_blocked": true,
+  "actions_read_only": true,
+  "fork_secrets_blocked": true,
+  "release_immutability": false,
+  "private_vulnerability_reporting": true
+}

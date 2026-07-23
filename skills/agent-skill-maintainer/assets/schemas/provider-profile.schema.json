@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/provider-profile.schema.json",
+  "title": "Workflow Provider Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile_schema_version", "provider_id", "role_type", "version_detection", "tested_versions", "last_verified_at", "supported_platforms", "capabilities", "artifact_contracts", "command_policy", "fallback", "blocking"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "profile_schema_version": {"type": "integer", "const": 1},
+    "provider_id": {"type": "string", "minLength": 1},
+    "role_type": {"type": "string", "enum": ["formal", "auxiliary"]},
+    "version_detection": {"type": "object"},
+    "tested_versions": {"type": "array", "items": {"type": "string"}},
+    "last_verified_at": {"type": ["string", "null"]},
+    "supported_platforms": {"type": "array", "items": {"type": "string"}},
+    "capabilities": {"type": "array", "items": {"type": "string"}},
+    "artifact_contracts": {"type": "array", "items": {"type": "object"}},
+    "command_policy": {"type": "object"},
+    "fallback": {"type": "object"},
+    "blocking": {"type": "object"},
+    "unsupported_versions": {"type": "array", "items": {"type": "string"}}
+  }
+}

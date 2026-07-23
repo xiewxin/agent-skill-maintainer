@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/candidate-snapshot.schema.json",
+  "title": "Isolated Candidate Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository_snapshot", "candidate_diff_hash", "changed_files", "approved_opt_ids", "process_artifact_prefixes", "file_opt_map", "diff_mapping_complete", "isolated"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "repository_snapshot": {"type": "object"},
+    "candidate_diff_hash": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "approved_opt_ids": {"type": "array", "items": {"type": "string"}},
+    "process_artifact_prefixes": {"type": "array", "items": {"type": "string"}},
+    "file_opt_map": {"type": "object"},
+    "diff_mapping_complete": {"type": "boolean"},
+    "isolated": {"type": "boolean"}
+  }
+}

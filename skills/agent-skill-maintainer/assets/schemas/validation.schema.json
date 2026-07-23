@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/validation.schema.json",
+  "title": "Candidate Validation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_diff_hash", "passed", "checks", "safety_pass_rate", "blockers"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "candidate_diff_hash": {"type": "string", "minLength": 1},
+    "passed": {"type": "boolean"},
+    "checks": {"type": "array", "items": {"type": "object"}},
+    "safety_pass_rate": {"type": "number"},
+    "blockers": {"type": "array", "items": {"type": "string"}}
+  }
+}

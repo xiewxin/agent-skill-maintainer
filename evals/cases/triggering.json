@@ -1,0 +1,38 @@
+[
+  {
+    "id": "TRIGGER-001",
+    "label": "explicit",
+    "prompt": "Use agent-skill-maintainer to review the Skill used in this task.",
+    "should_trigger": true
+  },
+  {
+    "id": "TRIGGER-002",
+    "label": "paraphrase",
+    "prompt": "Analyze why the Skill I just used needed repeated corrections and propose a reusable improvement.",
+    "should_trigger": true
+  },
+  {
+    "id": "TRIGGER-003",
+    "label": "missing-target",
+    "prompt": "Review the Skills involved in this task and show only evidence-backed candidates before I choose one.",
+    "should_trigger": true
+  },
+  {
+    "id": "TRIGGER-004",
+    "label": "negative",
+    "prompt": "Review this application code diff for bugs.",
+    "should_trigger": false
+  },
+  {
+    "id": "TRIGGER-005",
+    "label": "negative",
+    "prompt": "Install a Skill from this GitHub repository.",
+    "should_trigger": false
+  },
+  {
+    "id": "TRIGGER-006",
+    "label": "negative",
+    "prompt": "Create a new Skill from these requirements.",
+    "should_trigger": false
+  }
+]

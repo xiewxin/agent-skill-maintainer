@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "profile_schema_version": 1,
+  "provider_id": "gsd",
+  "role_type": "formal",
+  "version_detection": {
+    "kind": "filesystem",
+    "markers": [".planning"],
+    "version_files": [".planning/STATE.md", ".planning/PROJECT.md"]
+  },
+  "tested_versions": [],
+  "last_verified_at": null,
+  "supported_platforms": [],
+  "capabilities": ["project-context", "requirements", "roadmap", "phase-state"],
+  "artifact_contracts": [
+    {"capability": "project-context", "ownership": "provider", "discovery": ".planning/PROJECT.md"},
+    {"capability": "requirements", "ownership": "provider", "discovery": ".planning/REQUIREMENTS.md"},
+    {"capability": "roadmap", "ownership": "provider", "discovery": ".planning/ROADMAP.md"},
+    {"capability": "phase-state", "ownership": "provider", "discovery": ".planning/STATE.md"}
+  ],
+  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
+  "blocking": {"repository_required_failure": true}
+}

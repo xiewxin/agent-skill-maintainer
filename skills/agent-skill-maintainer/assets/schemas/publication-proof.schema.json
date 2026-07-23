@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/publication-proof.schema.json",
+  "title": "Official Publication Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "version", "tag", "commit", "release_url", "official"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "tag": {"type": "string", "minLength": 1},
+    "commit": {"type": "string", "minLength": 1},
+    "release_url": {"type": "string", "minLength": 1},
+    "official": {"type": "boolean"}
+  }
+}

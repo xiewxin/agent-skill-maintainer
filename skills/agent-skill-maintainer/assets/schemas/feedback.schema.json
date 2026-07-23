@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/feedback.schema.json",
+  "title": "Normalized Skill Feedback",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "target_skill", "phenomenon", "expected_behavior", "source_ids", "skill_version", "reproduction", "missing_evidence", "classification", "confidence", "provisional_owner"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "id": {"type": "string", "pattern": "FB-[0-9]{3,}"},
+    "target_skill": {"type": "string", "minLength": 1},
+    "phenomenon": {"type": "string", "minLength": 1},
+    "expected_behavior": {"type": "string", "minLength": 1},
+    "source_ids": {"type": "array", "items": {"type": "string"}},
+    "skill_version": {"type": ["string", "null"]},
+    "reproduction": {"type": "string", "minLength": 1},
+    "missing_evidence": {"type": "array", "items": {"type": "string"}},
+    "classification": {"type": "string", "enum": ["skill-defect", "new-requirement", "preference", "platform-limit", "external-cause", "no-problem", "unknown"]},
+    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+    "provisional_owner": {"type": "string", "minLength": 1}
+  }
+}

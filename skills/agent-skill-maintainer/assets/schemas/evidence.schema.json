@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/evidence.schema.json",
+  "title": "Redacted Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "source_type", "source_ref", "skill_version", "redacted_summary", "confidence"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "id": {"type": "string", "pattern": "EV-[0-9]{3,}"},
+    "source_type": {"type": "string", "enum": ["current-run", "provided-experience", "issue", "pr-review", "discussion", "provided-file"]},
+    "source_ref": {"type": "string", "minLength": 1},
+    "skill_version": {"type": ["string", "null"]},
+    "redacted_summary": {"type": "string", "minLength": 1},
+    "confidence": {"type": "string", "enum": ["low", "medium", "high"]}
+  }
+}

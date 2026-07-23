@@ -1,0 +1,14 @@
+docs/plans/
+docs/specs/
+docs/superpowers/
+node_modules/
+.agent-skill-maintainer/
+evals/results/
+evals/.runs/
+.codex/
+.claude/
+.idea/
+.vscode/
+*.log
+*.tmp
+.DS_Store

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "profile_schema_version": 1,
+  "provider_id": "spec-kit",
+  "role_type": "formal",
+  "version_detection": {
+    "kind": "filesystem",
+    "markers": [".specify"],
+    "version_files": [".specify/memory/constitution.md"]
+  },
+  "tested_versions": [],
+  "last_verified_at": null,
+  "supported_platforms": [],
+  "capabilities": ["specification", "planning", "task-decomposition"],
+  "artifact_contracts": [
+    {"capability": "specification", "ownership": "provider", "discovery": "specs/*/spec.md"},
+    {"capability": "planning", "ownership": "provider", "discovery": "specs/*/plan.md"},
+    {"capability": "task-decomposition", "ownership": "provider", "discovery": "specs/*/tasks.md"}
+  ],
+  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
+  "blocking": {"repository_required_failure": true}
+}

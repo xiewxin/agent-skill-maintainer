@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/merge-proof.schema.json",
+  "title": "Merge Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "pr_number", "merge_commit", "default_branch"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "minLength": 1},
+    "pr_number": {"type": "integer"},
+    "merge_commit": {"type": "string", "minLength": 1},
+    "default_branch": {"type": "string", "minLength": 1}
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/binding.schema.json",
+  "title": "Skill Repository Binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "binding_id", "skill", "source_repository", "installed_fingerprint", "install_method", "remote_verified", "relationship", "release_enabled"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "binding_id": {"type": "string", "minLength": 1},
+    "skill": {"type": "string", "minLength": 1},
+    "source_repository": {"type": "string", "minLength": 1},
+    "installed_fingerprint": {"type": ["string", "null"]},
+    "install_method": {"type": "string", "enum": ["npx-skills", "plugin", "symlink", "manual", "unknown"]},
+    "remote_verified": {"type": "boolean"},
+    "relationship": {"type": "string", "enum": ["analyze-only", "managed", "contribute"]},
+    "release_enabled": {"type": "boolean"}
+  }
+}

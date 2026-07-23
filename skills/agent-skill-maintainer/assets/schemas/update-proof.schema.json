@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/update-proof.schema.json",
+  "title": "Local Skill Update Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill", "from_version", "to_version", "install_method", "source_commit", "installed_fingerprint"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "skill": {"type": "string", "minLength": 1},
+    "from_version": {"type": ["string", "null"]},
+    "to_version": {"type": "string", "minLength": 1},
+    "install_method": {"type": "string", "minLength": 1},
+    "source_commit": {"type": "string", "minLength": 1},
+    "installed_fingerprint": {"type": "string", "minLength": 1}
+  }
+}
