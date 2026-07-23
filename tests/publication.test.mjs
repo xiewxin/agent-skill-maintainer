@@ -31,11 +31,15 @@ function runNode(...arguments_) {
 
 /** Reads a repository-relative UTF-8 file. */
 function read(relativePath) {
-  return readFileSync(resolve(ROOT, relativePath), "utf8");
+  return readFileSync(resolve(ROOT, relativePath), "utf8").replaceAll(
+    "\r\n",
+    "\n",
+  );
 }
 
 test("required public files and maintainer guidance exist", () => {
   const required = [
+    ".gitattributes",
     "LICENSE",
     "AGENTS.md",
     "README.md",
@@ -65,6 +69,7 @@ test("required public files and maintainer guidance exist", () => {
     }),
     [],
   );
+  assert.equal(read(".gitattributes").trim(), "* text=auto eol=lf");
   const rootGuidance = read("AGENTS.md");
   for (const relativePath of [
     ".agents/architecture.md",
