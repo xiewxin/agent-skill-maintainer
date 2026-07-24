@@ -16,6 +16,9 @@ import {
   validatePublication,
   validateStructuredAssets,
 } from "../scripts/validate-publication.mjs";
+import {
+  validateForwardEvaluationAggregate,
+} from "../evals/run-evals.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
@@ -90,6 +93,9 @@ test("README documents Preview, npx installation, and zero-dependency Node runti
     "MIT",
     "node skills/agent-skill-maintainer/scripts/maintainer.mjs",
     "No `npm install`",
+    "github-preview",
+    "github-reconcile",
+    "explicit confirmation",
   ]) {
     assert.ok(content.includes(phrase), `README missing: ${phrase}`);
   }
@@ -121,6 +127,11 @@ test("Skill metadata, trigger cases, references, and Preview boundary remain com
   assert.ok(skill.includes("Current Preview boundary"));
   assert.ok(skill.includes("do not substitute manual GitHub commands"));
   assert.ok(skill.includes("local-candidate Preview"));
+  assert.ok(skill.includes("state-bound GitHub apply"));
+  assert.ok(skill.includes("explicit confirmation"));
+  assert.ok(skill.includes("`FB-001`"));
+  assert.ok(skill.includes("`OPT-001`"));
+  assert.ok(skill.includes("Never mark an `OPT-*` as `accepted`"));
 
   const references = [
     "agent-documentation.md",
@@ -137,6 +148,11 @@ test("Skill metadata, trigger cases, references, and Preview boundary remain com
     assert.ok(!content.includes("TODO"));
     assert.ok(skill.includes(`references/${name}`));
   }
+  const evidenceContract = read(
+    "skills/agent-skill-maintainer/references/evidence-and-optimization.md",
+  );
+  assert.ok(evidenceContract.includes("Do not create an `OPT-*`"));
+  assert.ok(evidenceContract.includes("three or more digits"));
   const documentation = read(
     "skills/agent-skill-maintainer/references/agent-documentation.md",
   );
@@ -270,6 +286,76 @@ test("CLI target, state recovery, and schema validation are machine-readable", (
   }
 });
 
+test("CLI creates state-bound GitHub previews and expiring approvals", () => {
+  const root = mkdtempSync(join(tmpdir(), "maintainer-github-cli-"));
+  try {
+    const statePath = resolve(root, "github-state.json");
+    const previewPath = resolve(root, "github-preview.json");
+    writeFileSync(
+      statePath,
+      `${JSON.stringify({
+        run_id: "run-001",
+        binding_id: "binding-001",
+        account: "example-user",
+        repository: "example/skill",
+        relationship: "managed",
+        base_branch: "main",
+        base_commit: "0".repeat(40),
+        head_branch: "feature",
+        head_commit: "a".repeat(40),
+        diff_hash: "b".repeat(64),
+        action_target: {
+          title: "Improve workflow",
+          body: "Adds the verified improvement.",
+          draft: true,
+          head_repository: "example/skill",
+        },
+        release_enabled: false,
+        provider_contract_hash: "c".repeat(64),
+      })}\n`,
+      "utf8",
+    );
+    const preview = runNode(
+      CLI,
+      "github-preview",
+      "--action",
+      "pr_create",
+      "--state",
+      statePath,
+    );
+    assert.equal(preview.status, 0, preview.stderr);
+    const previewDocument = JSON.parse(preview.stdout);
+    assert.equal(previewDocument.action, "pr_create");
+    assert.equal(previewDocument.fingerprint.length, 64);
+    writeFileSync(
+      previewPath,
+      `${JSON.stringify(previewDocument)}\n`,
+      "utf8",
+    );
+
+    const approval = runNode(
+      CLI,
+      "github-approve",
+      "--preview",
+      previewPath,
+      "--confirmed-at",
+      "2026-07-23T08:00:00.000Z",
+      "--expires-at",
+      "2026-07-23T08:15:00.000Z",
+    );
+    assert.equal(approval.status, 0, approval.stderr);
+    const approvalDocument = JSON.parse(approval.stdout);
+    assert.equal(approvalDocument.action, "pr_create");
+    assert.equal(
+      approvalDocument.preview_fingerprint,
+      previewDocument.fingerprint,
+    );
+    assert.equal(approvalDocument.fingerprint.length, 64);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("publication, evaluation, and repository validators execute directly", () => {
   const publication = runNode("scripts/validate-publication.mjs");
   assert.equal(publication.status, 0, publication.stdout + publication.stderr);
@@ -289,7 +375,38 @@ test("publication, evaluation, and repository validators execute directly", () =
   assert.equal(report.release_ready, false);
   assert.equal(report.redacted_real_usage_cases, 1);
   assert.equal(report.real_usage_contract_passed, true);
-  assert.ok(report.release_blockers.includes("agent_forward_evaluation_pending"));
+  assert.equal(report.provider_version_validation.passed, true);
+  assert.equal(report.provider_version_validation.formal_profiles, 5);
+  assert.equal(
+    report.release_blockers.includes(
+      "provider_version_validation_pending",
+    ),
+    false,
+  );
+  assert.equal(report.agent_forward_evaluation.passed, true);
+  assert.match(
+    report.agent_forward_evaluation.candidate_skill_fingerprint,
+    /^[a-f0-9]{64}$/u,
+  );
+  assert.equal(
+    report.agent_forward_evaluation.candidate_passed_behaviors,
+    6,
+  );
+  assert.equal(report.agent_forward_evaluation.candidate_regressions, 0);
+  assert.equal(report.platform_validation.passed, true);
+  assert.deepEqual(
+    report.platform_validation.platforms.map((platform) => platform.id).sort(),
+    ["claude-code", "codex"],
+  );
+  assert.equal(
+    report.release_blockers.includes("agent_forward_evaluation_pending"),
+    false,
+  );
+  assert.equal(
+    report.release_blockers.includes("platform_validation_pending"),
+    false,
+  );
+  assert.deepEqual(report.release_blockers, ["controlled_github_e2e_pending"]);
 
   const repository = runNode(
     "scripts/validate-repository.mjs",
@@ -301,6 +418,26 @@ test("publication, evaluation, and repository validators execute directly", () =
   assert.equal(repositoryReport.compliant, false);
   assert.ok(repositoryReport.missing.includes("ruleset_required"));
   assert.ok(repositoryReport.missing.includes("release_immutability"));
+});
+
+test("forward evaluation aggregate rejects self-reported count drift", () => {
+  const aggregate = JSON.parse(
+    read("evals/evidence/preview-v0.1.0.json"),
+  );
+  const currentSkillFingerprint = aggregate.candidate_skill_fingerprint;
+  assert.equal(
+    validateForwardEvaluationAggregate(aggregate, {
+      currentSkillFingerprint,
+    }).forward.passed,
+    true,
+  );
+  aggregate.forward_evaluation.candidate_passed_behaviors = 5;
+  assert.equal(
+    validateForwardEvaluationAggregate(aggregate, {
+      currentSkillFingerprint,
+    }).forward.passed,
+    false,
+  );
 });
 
 test("publication validator scans public docs but excludes local process artifacts", () => {

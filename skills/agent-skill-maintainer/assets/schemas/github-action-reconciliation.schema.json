@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/github-action-reconciliation.schema.json",
+  "title": "GitHub Action Reconciliation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action",
+    "repository",
+    "approval_fingerprint",
+    "preview_fingerprint",
+    "observed_at",
+    "status",
+    "remote_state_hash"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "action": {"type": "string", "enum": ["pr_create", "pr_update", "merge", "release"]},
+    "repository": {"type": "string", "minLength": 1},
+    "approval_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "status": {"type": "string", "const": "not_applied"},
+    "remote_state_hash": {"type": "string", "pattern": "[a-f0-9]{64}"}
+  }
+}

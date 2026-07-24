@@ -30,6 +30,7 @@ import {
   applyGithubAction,
   buildGithubActionApproval,
   buildGithubActionPreview,
+  reconcileGithubAction,
   verifyGithubActionApproval,
   verifyGithubActionPreview,
 } from "../skills/agent-skill-maintainer/scripts/lib/github.mjs";
@@ -38,6 +39,15 @@ import {
   optimizationFixture,
   runGit,
 } from "./fixtures.mjs";
+
+const DOCUMENTATION_IMPACT = {
+  schema_version: 1,
+  status: "updated",
+  changed_guides: ["README.md"],
+  root_index_action: "verified-current",
+  contract_preserved: true,
+  reason: "README reflects the approved candidate behavior.",
+};
 
 /** Creates installed, source, and candidate roots for one isolated test. */
 function createIsolationFixture() {
@@ -587,7 +597,7 @@ test("release note coverage reports omitted PR and accepted OPT", () => {
   );
 });
 
-test("GitHub previews are stable, drift-bound, and do not apply", () => {
+test("GitHub previews are stable and drift-bound", () => {
   const state = {
     run_id: "run-001",
     binding_id: "binding-001",
@@ -595,10 +605,16 @@ test("GitHub previews are stable, drift-bound, and do not apply", () => {
     repository: "example/skill",
     relationship: "managed",
     base_branch: "main",
+    base_commit: "base123",
     head_branch: "feature",
     head_commit: "abc123",
     diff_hash: "diff123",
-    action_target: { title: "Improve workflow" },
+    action_target: {
+      title: "Improve workflow",
+      body: "Documents and tests the improvement.",
+      draft: false,
+      head_repository: "example/skill",
+    },
     release_enabled: false,
     provider_contract_hash: "provider123",
   };
@@ -642,7 +658,948 @@ test("GitHub previews are stable, drift-bound, and do not apply", () => {
       }),
     /過期/u,
   );
-  assert.throws(() => applyGithubAction(preview), /dry-run/u);
+  assert.throws(
+    () =>
+      buildGithubActionApproval(preview, {
+        confirmedAt: "2026-07-23T08:00:00.000Z",
+        expiresAt: "2026-07-23T08:31:00.000Z",
+      }),
+    /時間範圍/u,
+  );
+  const futureApproval = buildGithubActionApproval(preview, {
+    confirmedAt: "2026-07-23T09:00:00.000Z",
+    expiresAt: "2026-07-23T09:15:00.000Z",
+  });
+  assert.throws(
+    () =>
+      verifyGithubActionApproval(futureApproval, preview, {
+        now: "2026-07-23T08:00:00.000Z",
+      }),
+    /未來/u,
+  );
+});
+
+test("GitHub apply revalidates remote state and uses argument-safe gh commands", () => {
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "example-user",
+    repository: "example/skill",
+    relationship: "managed",
+    base_branch: "main",
+    base_commit: "b".repeat(40),
+    head_branch: "feature",
+    head_commit: "a".repeat(40),
+    diff_hash: "diff123",
+    action_target: {
+      title: "Improve workflow",
+      body: "Body with `code`, spaces, and $literal text.",
+      draft: false,
+      head_repository: "example/skill",
+    },
+    release_enabled: false,
+    provider_contract_hash: "provider123",
+  };
+  const preview = buildGithubActionPreview("pr_create", state);
+  const approval = buildGithubActionApproval(preview, {
+    confirmedAt: "2026-07-23T08:00:00.000Z",
+    expiresAt: "2026-07-23T08:15:00.000Z",
+  });
+  const calls = [];
+  const runner = (arguments_) => {
+    calls.push(arguments_);
+    const key = arguments_.slice(0, 3).join(" ");
+    if (key === "api user --jq") {
+      return { status: 0, stdout: "example-user\n", stderr: "" };
+    }
+    if (key === "repo view example/skill") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: "example/skill",
+          viewerPermission: "ADMIN",
+          defaultBranchRef: { name: "main" },
+        }),
+        stderr: "",
+      };
+    }
+    if (key === "api repos/example/skill/commits/feature --jq") {
+      return { status: 0, stdout: `${state.head_commit}\n`, stderr: "" };
+    }
+    if (key === "api repos/example/skill/branches/main --jq") {
+      return { status: 0, stdout: `${state.base_commit}\n`, stderr: "" };
+    }
+    if (key === "pr create --repo") {
+      return {
+        status: 0,
+        stdout: "https://github.com/example/skill/pull/7\n",
+        stderr: "",
+      };
+    }
+    if (key === "pr view 7") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          number: 7,
+          url: "https://github.com/example/skill/pull/7",
+          baseRefName: "main",
+          headRefOid: state.head_commit,
+          headRepository: { nameWithOwner: "example/skill" },
+          state: "OPEN",
+          isDraft: false,
+          statusCheckRollup: [],
+          title: state.action_target.title,
+          body: state.action_target.body,
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`unexpected gh call: ${arguments_.join(" ")}`);
+  };
+
+  const result = applyGithubAction(preview, approval, {
+    now: "2026-07-23T08:10:00.000Z",
+    runner,
+    documentationImpact: DOCUMENTATION_IMPACT,
+  });
+
+  assert.equal(result.action, "pr_create");
+  assert.equal(result.repository, "example/skill");
+  assert.equal(result.url, "https://github.com/example/skill/pull/7");
+  assert.equal(result.proof.number, 7);
+  assert.equal(result.proof.head_commit, state.head_commit);
+  assert.deepEqual(
+    result.proof.documentation_impact,
+    DOCUMENTATION_IMPACT,
+  );
+  const mutation = calls.find(
+    (arguments_) =>
+      arguments_[0] === "pr" && arguments_[1] === "create",
+  );
+  assert.ok(mutation);
+  assert.deepEqual(mutation.slice(0, 8), [
+    "pr",
+    "create",
+    "--repo",
+    "example/skill",
+    "--base",
+    "main",
+    "--head",
+    "feature",
+  ]);
+  assert.equal(mutation[mutation.indexOf("--body") + 1], state.action_target.body);
+  assert.ok(!mutation.includes("--admin"));
+  assert.ok(!mutation.includes("--auto"));
+});
+
+test("GitHub apply refuses account, commit, approval, and relationship drift", () => {
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "example-user",
+    repository: "example/skill",
+    relationship: "managed",
+    base_branch: "main",
+    base_commit: "b".repeat(40),
+    head_branch: "feature",
+    head_commit: "a".repeat(40),
+    diff_hash: "diff123",
+    action_target: {
+      title: "Improve workflow",
+      body: "A complete body.",
+      draft: true,
+      head_repository: "example/skill",
+    },
+    release_enabled: false,
+    provider_contract_hash: "provider123",
+  };
+  const preview = buildGithubActionPreview("pr_create", state);
+  const approval = buildGithubActionApproval(preview, {
+    confirmedAt: "2026-07-23T08:00:00.000Z",
+    expiresAt: "2026-07-23T08:15:00.000Z",
+  });
+  let mutationCount = 0;
+  const runner = (arguments_) => {
+    if (arguments_[0] === "pr" && arguments_[1] === "create") {
+      mutationCount += 1;
+    }
+    if (arguments_[0] === "api" && arguments_[1] === "user") {
+      return { status: 0, stdout: "different-user\n", stderr: "" };
+    }
+    throw new Error("mutation should not be reached");
+  };
+  assert.throws(
+    () =>
+      applyGithubAction(preview, approval, {
+        now: "2026-07-23T08:10:00.000Z",
+        runner,
+      }),
+    /active account/u,
+  );
+  assert.equal(mutationCount, 0);
+  assert.throws(
+    () =>
+      applyGithubAction(preview, approval, {
+        now: "2026-07-23T08:15:00.000Z",
+        runner,
+      }),
+    /過期/u,
+  );
+  assert.equal(mutationCount, 0);
+  assert.throws(
+    () =>
+      buildGithubActionPreview("merge", {
+        ...state,
+        relationship: "contribute",
+        action_target: { pr_number: 7, method: "squash" },
+      }),
+    /managed/u,
+  );
+  assert.throws(
+    () =>
+      buildGithubActionPreview("pr_create", {
+        ...state,
+        action_target: {
+          ...state.action_target,
+          head_repository: "someone-else/skill",
+        },
+      }),
+    /同一 repository/u,
+  );
+
+  const baseDriftRunner = (arguments_) => {
+    if (arguments_[0] === "api" && arguments_[1] === "user") {
+      return { status: 0, stdout: "example-user\n", stderr: "" };
+    }
+    if (arguments_[0] === "repo" && arguments_[1] === "view") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: "example/skill",
+          viewerPermission: "ADMIN",
+          defaultBranchRef: { name: "main" },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] === "repos/example/skill/branches/main"
+    ) {
+      return {
+        status: 0,
+        stdout: `${"c".repeat(40)}\n`,
+        stderr: "",
+      };
+    }
+    throw new Error("mutation should not be reached");
+  };
+  assert.throws(
+    () =>
+      applyGithubAction(preview, approval, {
+        now: "2026-07-23T08:10:00.000Z",
+        runner: baseDriftRunner,
+      }),
+    /base branch commit/u,
+  );
+});
+
+test("managed PR update refuses a head repository from another fork", () => {
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "example-user",
+    repository: "example/skill",
+    relationship: "managed",
+    base_branch: "main",
+    base_commit: "b".repeat(40),
+    head_branch: "feature",
+    head_commit: "a".repeat(40),
+    diff_hash: "diff123",
+    action_target: {
+      pr_number: 7,
+      title: "Improve workflow",
+      body: "Updated body.",
+    },
+    release_enabled: false,
+    provider_contract_hash: "provider123",
+  };
+  const preview = buildGithubActionPreview("pr_update", state);
+  const approval = buildGithubActionApproval(preview, {
+    confirmedAt: "2026-07-23T08:00:00.000Z",
+    expiresAt: "2026-07-23T08:15:00.000Z",
+  });
+  let mutationCount = 0;
+  const runner = (arguments_) => {
+    if (arguments_[0] === "pr" && arguments_[1] === "edit") {
+      mutationCount += 1;
+    }
+    if (arguments_[0] === "api" && arguments_[1] === "user") {
+      return { status: 0, stdout: "example-user\n", stderr: "" };
+    }
+    if (arguments_[0] === "repo" && arguments_[1] === "view") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: "example/skill",
+          viewerPermission: "ADMIN",
+          defaultBranchRef: { name: "main" },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] === "repos/example/skill/branches/main"
+    ) {
+      return { status: 0, stdout: `${state.base_commit}\n`, stderr: "" };
+    }
+    if (arguments_[0] === "pr" && arguments_[1] === "view") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          baseRefName: "main",
+          headRefName: "feature",
+          headRefOid: state.head_commit,
+          headRepository: { nameWithOwner: "someone-else/skill" },
+          state: "OPEN",
+          isDraft: false,
+          mergeable: "MERGEABLE",
+          statusCheckRollup: [],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`unexpected gh call: ${arguments_.join(" ")}`);
+  };
+
+  assert.throws(
+    () =>
+      applyGithubAction(preview, approval, {
+        now: "2026-07-23T08:10:00.000Z",
+        runner,
+        documentationImpact: DOCUMENTATION_IMPACT,
+      }),
+    /head repository/u,
+  );
+  assert.equal(mutationCount, 0);
+});
+
+test("contribute PR apply and reconcile accept the confirmed account fork", () => {
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "contributor",
+    repository: "example/skill",
+    relationship: "contribute",
+    base_branch: "main",
+    base_commit: "b".repeat(40),
+    head_branch: "feature",
+    head_commit: "a".repeat(40),
+    diff_hash: "diff123",
+    action_target: {
+      title: "Improve workflow",
+      body: "Fork contribution.",
+      draft: true,
+      head_repository: "contributor/skill",
+    },
+    release_enabled: false,
+    provider_contract_hash: "provider123",
+  };
+  const preview = buildGithubActionPreview("pr_create", state);
+  const approval = buildGithubActionApproval(preview, {
+    confirmedAt: "2026-07-23T08:00:00.000Z",
+    expiresAt: "2026-07-23T08:15:00.000Z",
+  });
+  const pullRequest = {
+    number: 7,
+    url: "https://github.com/example/skill/pull/7",
+    baseRefName: "main",
+    headRefName: "feature",
+    headRefOid: state.head_commit,
+    headRepository: { nameWithOwner: "contributor/skill" },
+    state: "OPEN",
+    isDraft: true,
+    statusCheckRollup: [],
+    title: state.action_target.title,
+    body: state.action_target.body,
+  };
+  const calls = [];
+  const runner = (arguments_) => {
+    calls.push(arguments_);
+    if (arguments_[0] === "api" && arguments_[1] === "user") {
+      return { status: 0, stdout: "contributor\n", stderr: "" };
+    }
+    if (arguments_[0] === "repo" && arguments_[1] === "view") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: "example/skill",
+          viewerPermission: "READ",
+          defaultBranchRef: { name: "main" },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] === "repos/example/skill/branches/main"
+    ) {
+      return { status: 0, stdout: `${state.base_commit}\n`, stderr: "" };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] === "repos/contributor/skill/commits/feature"
+    ) {
+      return { status: 0, stdout: `${state.head_commit}\n`, stderr: "" };
+    }
+    if (arguments_[0] === "pr" && arguments_[1] === "create") {
+      return { status: 0, stdout: `${pullRequest.url}\n`, stderr: "" };
+    }
+    if (arguments_[0] === "pr" && arguments_[1] === "view") {
+      return {
+        status: 0,
+        stdout: JSON.stringify(pullRequest),
+        stderr: "",
+      };
+    }
+    throw new Error(`unexpected gh call: ${arguments_.join(" ")}`);
+  };
+  const applied = applyGithubAction(preview, approval, {
+    now: "2026-07-23T08:10:00.000Z",
+    runner,
+    documentationImpact: DOCUMENTATION_IMPACT,
+  });
+  assert.equal(applied.proof.number, 7);
+  assert.ok(
+    calls.some(
+      (arguments_) =>
+        arguments_[0] === "pr" &&
+        arguments_[1] === "create" &&
+        arguments_.includes("contributor:feature"),
+    ),
+  );
+
+  const recovered = reconcileGithubAction(preview, {
+    documentationImpact: DOCUMENTATION_IMPACT,
+    runner: (arguments_) => {
+      assert.deepEqual(arguments_.slice(0, 2), ["pr", "list"]);
+      assert.equal(
+        arguments_[arguments_.indexOf("--head") + 1],
+        "feature",
+      );
+      return {
+        status: 0,
+        stdout: JSON.stringify([pullRequest]),
+        stderr: "",
+      };
+    },
+  });
+  assert.equal(recovered.status, "applied");
+  assert.equal(recovered.proof.number, 7);
+});
+
+test("PR create reconcile proves absence before a fresh confirmation", () => {
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "contributor",
+    repository: "example/skill",
+    relationship: "contribute",
+    base_branch: "main",
+    base_commit: "b".repeat(40),
+    head_branch: "feature",
+    head_commit: "a".repeat(40),
+    diff_hash: "diff123",
+    action_target: {
+      title: "Improve workflow",
+      body: "Fork contribution.",
+      draft: true,
+      head_repository: "contributor/skill",
+    },
+    release_enabled: false,
+    provider_contract_hash: "provider123",
+  };
+  const preview = buildGithubActionPreview("pr_create", state);
+  const calls = [];
+  const result = reconcileGithubAction(preview, {
+    approvalFingerprint: "d".repeat(64),
+    now: "2026-07-23T08:10:00.000Z",
+    documentationImpact: DOCUMENTATION_IMPACT,
+    runner: (arguments_) => {
+      calls.push(arguments_);
+      if (arguments_[0] === "pr" && arguments_[1] === "list") {
+        assert.equal(
+          arguments_[arguments_.indexOf("--head") + 1],
+          "feature",
+        );
+        return { status: 0, stdout: "[]\n", stderr: "" };
+      }
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] === "--method" &&
+        arguments_[2] === "GET"
+      ) {
+        assert.ok(arguments_.includes("head=contributor:feature"));
+        return { status: 0, stdout: "[]\n", stderr: "" };
+      }
+      throw new Error(`unexpected gh call: ${arguments_.join(" ")}`);
+    },
+  });
+
+  assert.equal(result.status, "not_applied");
+  assert.equal(result.absence_proof.action, "pr_create");
+  assert.equal(
+    result.absence_proof.approval_fingerprint,
+    "d".repeat(64),
+  );
+  assert.equal(calls.length, 2);
+});
+
+test("PR create reconcile blocks metadata drift and recovers a REST identity match", () => {
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "contributor",
+    repository: "example/skill",
+    relationship: "contribute",
+    base_branch: "main",
+    base_commit: "b".repeat(40),
+    head_branch: "feature",
+    head_commit: "a".repeat(40),
+    diff_hash: "diff123",
+    action_target: {
+      title: "Improve workflow",
+      body: "Fork contribution.",
+      draft: true,
+      head_repository: "contributor/skill",
+    },
+    release_enabled: false,
+    provider_contract_hash: "provider123",
+  };
+  const preview = buildGithubActionPreview("pr_create", state);
+  const identity = {
+    number: 7,
+    url: "https://github.com/example/skill/pull/7",
+    baseRefName: "main",
+    headRefName: "feature",
+    headRefOid: state.head_commit,
+    headRepository: { nameWithOwner: "contributor/skill" },
+    state: "OPEN",
+    isDraft: true,
+    statusCheckRollup: [],
+    title: "Edited by a bot",
+    body: state.action_target.body,
+  };
+  assert.throws(
+    () =>
+      reconcileGithubAction(preview, {
+        approvalFingerprint: "d".repeat(64),
+        documentationImpact: DOCUMENTATION_IMPACT,
+        runner: () => ({
+          status: 0,
+          stdout: JSON.stringify([identity]),
+          stderr: "",
+        }),
+      }),
+    /metadata/u,
+  );
+
+  let readCount = 0;
+  const recovered = reconcileGithubAction(preview, {
+    documentationImpact: DOCUMENTATION_IMPACT,
+    runner: (arguments_) => {
+      readCount += 1;
+      if (arguments_[0] === "pr") {
+        return { status: 0, stdout: "[]\n", stderr: "" };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify([
+          {
+            number: 7,
+            html_url: "https://github.com/example/skill/pull/7",
+            base: { ref: "main" },
+            head: {
+              ref: "feature",
+              sha: state.head_commit,
+              repo: { full_name: "contributor/skill" },
+            },
+            state: "open",
+            draft: true,
+            title: state.action_target.title,
+            body: state.action_target.body,
+          },
+        ]),
+        stderr: "",
+      };
+    },
+  });
+  assert.equal(recovered.status, "applied");
+  assert.equal(recovered.proof.number, 7);
+  assert.equal(readCount, 2);
+});
+
+test("merge and release reconcile return bound not-applied proofs", () => {
+  const headCommit = "a".repeat(40);
+  const base = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "example-user",
+    repository: "example/skill",
+    relationship: "managed",
+    base_branch: "main",
+    base_commit: headCommit,
+    head_branch: "feature",
+    head_commit: headCommit,
+    diff_hash: "diff123",
+    release_enabled: true,
+    provider_contract_hash: "provider123",
+  };
+  const mergePreview = buildGithubActionPreview("merge", {
+    ...base,
+    action_target: { pr_number: 7, method: "squash" },
+  });
+  const mergeResult = reconcileGithubAction(mergePreview, {
+    approvalFingerprint: "e".repeat(64),
+    now: "2026-07-23T08:10:00.000Z",
+    runner: (arguments_) => {
+      assert.deepEqual(arguments_.slice(0, 3), ["pr", "view", "7"]);
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          number: 7,
+          baseRefName: "main",
+          headRefOid: headCommit,
+          headRepository: { nameWithOwner: "example/skill" },
+          state: "OPEN",
+          mergedAt: null,
+          mergeCommit: null,
+        }),
+        stderr: "",
+      };
+    },
+  });
+  assert.equal(mergeResult.status, "not_applied");
+  assert.equal(mergeResult.absence_proof.action, "merge");
+
+  const coverage = evaluateReleaseNoteCoverage(
+    {
+      schema_version: 1,
+      previous_ref: "v0.0.1",
+      previous_commit: "0".repeat(40),
+      candidate_ref: "HEAD",
+      candidate_commit: headCommit,
+      commits: [
+        {
+          commit: headCommit,
+          subject: "feat: workflow",
+          pull_requests: [7],
+        },
+      ],
+      pull_requests: [7],
+    },
+    {
+      mappings: [
+        {
+          id: "NOTE-001",
+          disposition: "included",
+          source_commits: [headCommit],
+          source_prs: [7],
+          optimization_ids: ["OPT-001"],
+          note: "Publishes the workflow improvement.",
+          reason: "",
+        },
+      ],
+      requiredOptimizationIds: new Set(["OPT-001"]),
+    },
+  );
+  const releasePreview = buildGithubActionPreview("release", {
+    ...base,
+    action_target: {
+      version: "v0.1.0",
+      title: "Agent Skill Maintainer v0.1.0",
+      notes: "Preview release.",
+      draft: false,
+      prerelease: true,
+      release_note_coverage: coverage,
+    },
+  });
+  const releaseResult = reconcileGithubAction(releasePreview, {
+    approvalFingerprint: "f".repeat(64),
+    now: "2026-07-23T08:10:00.000Z",
+    runner: (arguments_) => {
+      assert.deepEqual(arguments_.slice(0, 2), ["api", "graphql"]);
+      return {
+        status: 0,
+        stdout: JSON.stringify({ release: null, ref: null }),
+        stderr: "",
+      };
+    },
+  });
+  assert.equal(releaseResult.status, "not_applied");
+  assert.equal(releaseResult.absence_proof.action, "release");
+});
+
+test("GitHub update, merge, and release apply only their approved action", () => {
+  const headCommit = "a".repeat(40);
+  const base = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "example-user",
+    repository: "example/skill",
+    relationship: "managed",
+    base_branch: "main",
+    base_commit: headCommit,
+    head_branch: "feature",
+    head_commit: headCommit,
+    diff_hash: "diff123",
+    release_enabled: true,
+    provider_contract_hash: "provider123",
+  };
+  const inventory = {
+    schema_version: 1,
+    previous_ref: "v0.0.1",
+    previous_commit: "0".repeat(40),
+    candidate_ref: "HEAD",
+    candidate_commit: headCommit,
+    commits: [
+      {
+        commit: headCommit,
+        subject: "feat: workflow",
+        pull_requests: [7],
+      },
+    ],
+    pull_requests: [7],
+  };
+  const releaseCoverage = evaluateReleaseNoteCoverage(inventory, {
+    mappings: [
+      {
+        id: "NOTE-001",
+        disposition: "included",
+        source_commits: [headCommit],
+        source_prs: [7],
+        optimization_ids: ["OPT-001"],
+        note: "Publishes the workflow improvement.",
+        reason: "",
+      },
+    ],
+    requiredOptimizationIds: new Set(["OPT-001"]),
+  });
+  const scenarios = [
+    {
+      action: "pr_update",
+      target: {
+        pr_number: 7,
+        title: "Improve workflow",
+        body: "Updated body.",
+      },
+      mutation: ["pr", "edit", "7"],
+      output: "",
+    },
+    {
+      action: "merge",
+      target: { pr_number: 7, method: "squash" },
+      mutation: ["pr", "merge", "7"],
+      output: "",
+    },
+    {
+      action: "release",
+      target: {
+        version: "v0.1.0",
+        title: "Agent Skill Maintainer v0.1.0",
+        notes: "Preview release.",
+        draft: false,
+        prerelease: true,
+        release_note_coverage: releaseCoverage,
+      },
+      mutation: ["release", "create", "v0.1.0"],
+      output: "https://github.com/example/skill/releases/tag/v0.1.0\n",
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const preview = buildGithubActionPreview(scenario.action, {
+      ...base,
+      action_target: scenario.target,
+    });
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-23T08:00:00.000Z",
+      expiresAt: "2026-07-23T08:15:00.000Z",
+    });
+    const calls = [];
+    const runner = (arguments_) => {
+      calls.push(arguments_);
+      if (arguments_[0] === "api" && arguments_[1] === "user") {
+        return { status: 0, stdout: "example-user\n", stderr: "" };
+      }
+      if (arguments_[0] === "repo" && arguments_[1] === "view") {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            nameWithOwner: "example/skill",
+            viewerPermission: "ADMIN",
+            defaultBranchRef: { name: "main" },
+          }),
+          stderr: "",
+        };
+      }
+      if (arguments_[0] === "pr" && arguments_[1] === "view") {
+        const jsonFields = arguments_[arguments_.indexOf("--json") + 1];
+        if (
+          jsonFields ===
+          "number,url,baseRefName,headRefName,headRefOid,headRepository,state,isDraft,statusCheckRollup,title,body"
+        ) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              number: 7,
+              url: "https://github.com/example/skill/pull/7",
+              baseRefName: "main",
+              headRefOid: headCommit,
+              headRepository: { nameWithOwner: "example/skill" },
+              state: "OPEN",
+              isDraft: false,
+              statusCheckRollup: [
+                { name: "validation", conclusion: "SUCCESS" },
+              ],
+              title: scenario.target.title,
+              body: scenario.target.body,
+            }),
+            stderr: "",
+          };
+        }
+        if (
+          jsonFields ===
+          "number,baseRefName,state,mergedAt,mergeCommit"
+        ) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              number: 7,
+              baseRefName: "main",
+              state: "MERGED",
+              mergedAt: "2026-07-23T08:10:01.000Z",
+              mergeCommit: { oid: "m".repeat(40) },
+            }),
+            stderr: "",
+          };
+        }
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            baseRefName: "main",
+            headRefName: "feature",
+            headRefOid: headCommit,
+            headRepository: { nameWithOwner: "example/skill" },
+            state: "OPEN",
+            isDraft: false,
+            mergeable: "MERGEABLE",
+            statusCheckRollup: [
+              { name: "validation", conclusion: "SUCCESS" },
+            ],
+          }),
+          stderr: "",
+        };
+      }
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] === `repos/example/skill/commits/${headCommit}`
+      ) {
+        return { status: 0, stdout: `${headCommit}\n`, stderr: "" };
+      }
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] === "repos/example/skill/branches/main"
+      ) {
+        return { status: 0, stdout: `${headCommit}\n`, stderr: "" };
+      }
+      if (
+        scenario.action === "release" &&
+        arguments_[0] === "api" &&
+        arguments_[1] === "graphql"
+      ) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ release: null, ref: null }),
+          stderr: "",
+        };
+      }
+      if (
+        scenario.action === "release" &&
+        arguments_[0] === "api" &&
+        arguments_[1] ===
+          "repos/example/skill/immutable-releases"
+      ) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ enabled: true }),
+          stderr: "",
+        };
+      }
+      if (
+        scenario.action === "release" &&
+        arguments_[0] === "release" &&
+        arguments_[1] === "view"
+      ) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            tagName: "v0.1.0",
+            targetCommitish: headCommit,
+            url: scenario.output.trim(),
+            isDraft: false,
+            isPrerelease: true,
+          }),
+          stderr: "",
+        };
+      }
+      if (
+        scenario.action === "release" &&
+        arguments_[0] === "api" &&
+        arguments_[1] ===
+          "repos/example/skill/commits/v0.1.0"
+      ) {
+        return { status: 0, stdout: `${headCommit}\n`, stderr: "" };
+      }
+      if (
+        scenario.mutation.every(
+          (part, index) => arguments_[index] === part,
+        )
+      ) {
+        return { status: 0, stdout: scenario.output, stderr: "" };
+      }
+      throw new Error(`unexpected gh call: ${arguments_.join(" ")}`);
+    };
+
+    const result = applyGithubAction(preview, approval, {
+      now: "2026-07-23T08:10:00.000Z",
+      runner,
+      documentationImpact:
+        scenario.action === "pr_update"
+          ? DOCUMENTATION_IMPACT
+          : null,
+    });
+    assert.equal(result.action, scenario.action);
+    if (scenario.action === "pr_update") {
+      assert.equal(result.proof.number, 7);
+      assert.equal(result.proof.state, "open");
+    } else if (scenario.action === "merge") {
+      assert.equal(result.proof.pr_number, 7);
+      assert.equal(result.proof.merge_commit, "m".repeat(40));
+    } else {
+      assert.equal(result.proof.version, "v0.1.0");
+      assert.equal(result.proof.commit, headCommit);
+    }
+    const mutation = calls.find((arguments_) =>
+      scenario.mutation.every(
+        (part, index) => arguments_[index] === part,
+      ),
+    );
+    assert.ok(mutation);
+    assert.ok(!mutation.includes("--admin"));
+    assert.ok(!mutation.includes("--auto"));
+  }
 });
 
 test("release preview requires complete coverage bound to head commit", () => {
@@ -672,11 +1629,16 @@ test("release preview requires complete coverage bound to head commit", () => {
     repository: "example/skill",
     relationship: "managed",
     base_branch: "main",
+    base_commit: "base123",
     head_branch: "feature",
     head_commit: "abc123",
     diff_hash: "diff123",
     action_target: {
       version: "v1.0.0",
+      title: "Agent Skill Maintainer v1.0.0",
+      notes: "Release notes.",
+      draft: false,
+      prerelease: false,
       release_note_coverage: incompleteCoverage,
     },
     release_enabled: true,
@@ -720,6 +1682,17 @@ test("release preview requires complete coverage bound to head commit", () => {
   assert.equal(
     buildGithubActionPreview("release", state).action,
     "release",
+  );
+  assert.throws(
+    () =>
+      buildGithubActionPreview("release", {
+        ...state,
+        action_target: {
+          ...state.action_target,
+          draft: true,
+        },
+      }),
+    /非 draft/u,
   );
   assert.throws(
     () =>

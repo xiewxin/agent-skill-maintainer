@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/blinded-forward-aggregate.schema.json",
+  "title": "Blinded Forward Evaluation Aggregate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_kind",
+    "evaluated_at",
+    "fixture",
+    "candidate_skill_fingerprint",
+    "raw_outputs_published",
+    "forward_evaluation",
+    "platform_validation",
+    "limits"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "evidence_kind": {
+      "type": "string",
+      "const": "blinded-forward-aggregate"
+    },
+    "evaluated_at": {"type": "string", "minLength": 1},
+    "fixture": {"type": "string", "minLength": 1},
+    "candidate_skill_fingerprint": {
+      "type": "string",
+      "pattern": "[a-f0-9]{64}"
+    },
+    "raw_outputs_published": {"type": "boolean", "const": false},
+    "forward_evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "same_model_and_tools",
+        "expected_findings_hidden",
+        "required_behaviors",
+        "baseline_passed_behaviors",
+        "candidate_passed_behaviors",
+        "candidate_regressions",
+        "false_positive_optimizations",
+        "passed"
+      ],
+      "properties": {
+        "same_model_and_tools": {"type": "boolean"},
+        "expected_findings_hidden": {"type": "boolean"},
+        "required_behaviors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "baseline", "candidate"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "baseline": {"type": "boolean"},
+              "candidate": {"type": "boolean"}
+            }
+          }
+        },
+        "baseline_passed_behaviors": {"type": "integer"},
+        "candidate_passed_behaviors": {"type": "integer"},
+        "candidate_regressions": {"type": "integer"},
+        "false_positive_optimizations": {"type": "integer"},
+        "passed": {"type": "boolean"}
+      }
+    },
+    "platform_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["installer", "platforms", "passed"],
+      "properties": {
+        "installer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version", "scope"],
+          "properties": {
+            "name": {"type": "string", "const": "skills"},
+            "version": {"type": "string", "minLength": 1},
+            "scope": {
+              "type": "string",
+              "const": "isolated-project-copy"
+            }
+          }
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "version",
+              "explicit_trigger",
+              "target_and_reference_read",
+              "positive_analysis",
+              "negative_non_trigger",
+              "stable_ids",
+              "decision_boundary",
+              "files_modified",
+              "passed"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": ["codex", "claude-code"]
+              },
+              "version": {"type": "string", "minLength": 1},
+              "explicit_trigger": {"type": "boolean"},
+              "target_and_reference_read": {"type": "boolean"},
+              "positive_analysis": {"type": "boolean"},
+              "negative_non_trigger": {"type": "boolean"},
+              "stable_ids": {"type": "boolean"},
+              "decision_boundary": {"type": "boolean"},
+              "files_modified": {"type": "boolean"},
+              "passed": {"type": "boolean"}
+            }
+          }
+        },
+        "passed": {"type": "boolean"}
+      }
+    },
+    "limits": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

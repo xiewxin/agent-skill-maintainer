@@ -37,6 +37,8 @@ export const SCHEMA_NAMES = Object.freeze([
   "update-proof",
   "documentation-impact",
   "github-action-approval",
+  "github-action-reconciliation",
+  "blinded-forward-aggregate",
 ]);
 
 export const PROVIDER_IDS = Object.freeze([
@@ -592,12 +594,43 @@ export function loadProviderProfiles(profileRoot = PROVIDER_PROFILE_ROOT) {
     }
     for (const name of [
       "tested_versions",
+      "verification_evidence",
       "capabilities",
       "artifact_contracts",
     ]) {
       if (!Array.isArray(profile[name])) {
         throw new Error(`${name} 必須是 array：${providerId}`);
       }
+    }
+    const evidenceVersions = profile.verification_evidence
+      .map((item) => item?.version)
+      .sort();
+    const testedVersions = [...profile.tested_versions].sort();
+    if (
+      canonicalJson(evidenceVersions) !== canonicalJson(testedVersions)
+    ) {
+      throw new Error(
+        `Provider tested_versions 與 verification_evidence 不一致：${providerId}`,
+      );
+    }
+    if (
+      testedVersions.length === 0 &&
+      profile.last_verified_at !== null
+    ) {
+      throw new Error(
+        `未測版本的 Provider 不可宣稱 last_verified_at：${providerId}`,
+      );
+    }
+    if (
+      testedVersions.length > 0 &&
+      (
+        typeof profile.last_verified_at !== "string" ||
+        !Number.isFinite(Date.parse(profile.last_verified_at))
+      )
+    ) {
+      throw new Error(
+        `Provider 版本證據缺少有效 last_verified_at：${providerId}`,
+      );
     }
     profiles[providerId] = profile;
   }

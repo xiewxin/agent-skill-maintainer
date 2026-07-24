@@ -10,6 +10,7 @@
   },
   "tested_versions": [],
   "last_verified_at": null,
+  "verification_evidence": [],
   "supported_platforms": [],
   "capabilities": ["skill-structure", "trigger-design", "baseline-evaluation", "forward-evaluation"],
   "artifact_contracts": [

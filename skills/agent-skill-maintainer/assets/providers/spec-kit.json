@@ -8,8 +8,22 @@
     "markers": [".specify"],
     "version_files": [".specify/memory/constitution.md"]
   },
-  "tested_versions": [],
-  "last_verified_at": null,
+  "tested_versions": ["v0.13.4"],
+  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "verification_evidence": [
+    {
+      "version": "v0.13.4",
+      "repository": "github/spec-kit",
+      "repository_status": "active",
+      "release_url": "https://github.com/github/spec-kit/releases/tag/v0.13.4",
+      "scope": "artifact-contract-read-only",
+      "artifacts": [
+        "templates/spec-template.md",
+        "templates/plan-template.md",
+        "templates/tasks-template.md"
+      ]
+    }
+  ],
   "supported_platforms": [],
   "capabilities": ["specification", "planning", "task-decomposition"],
   "artifact_contracts": [

@@ -4,9 +4,9 @@
   "title": "Maintainer Run State",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "run_id", "binding_id", "phase", "status", "approvals", "consumed_approval_fingerprints"],
+  "required": ["schema_version", "run_id", "binding_id", "phase", "status", "approvals", "consumed_approval_fingerprints", "attempted_github_action_fingerprints", "github_action_attempts", "github_action_reconciliations"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 2},
+    "schema_version": {"type": "integer", "const": 4},
     "run_id": {"type": "string", "minLength": 1},
     "binding_id": {"type": "string", "minLength": 1},
     "phase": {
@@ -22,6 +22,26 @@
     "consumed_approval_fingerprints": {
       "type": "array",
       "items": {"type": "string", "pattern": "[a-f0-9]{64}"}
+    },
+    "attempted_github_action_fingerprints": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "[a-f0-9]{64}"}
+    },
+    "github_action_attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "approval_fingerprint"],
+        "properties": {
+          "action": {"type": "string", "enum": ["pr_create", "pr_update", "merge", "release", "unknown"]},
+          "approval_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+        }
+      }
+    },
+    "github_action_reconciliations": {
+      "type": "array",
+      "items": {"type": "object"}
     },
     "action_preview": {"type": "object"},
     "repository_snapshot": {"type": "object"},

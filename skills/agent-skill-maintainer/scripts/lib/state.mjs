@@ -57,6 +57,12 @@ const CONSUMED_ACTION_PHASES = new Set([
   "release",
   "local_update",
 ]);
+const GITHUB_ACTION_PHASES = Object.freeze({
+  pr_create: "pr_creation",
+  pr_update: "pr_update",
+  merge: "merge",
+  release: "release",
+});
 const NEXT_PHASES = Object.freeze({
   target_selection: new Set(["evidence_collection"]),
   evidence_collection: new Set(["feedback_validation"]),
@@ -67,6 +73,7 @@ const NEXT_PHASES = Object.freeze({
   implementation: new Set(["validation", "optimization_approval"]),
   validation: new Set(["pr_creation", "optimization_approval"]),
   pr_creation: new Set([
+    "pr_creation",
     "pr_update",
     "merge",
     "optimization_approval",
@@ -78,8 +85,8 @@ const NEXT_PHASES = Object.freeze({
     "optimization_approval",
     "completed",
   ]),
-  merge: new Set(["release", "completed"]),
-  release: new Set(["local_update", "completed"]),
+  merge: new Set(["merge", "release", "completed"]),
+  release: new Set(["release", "local_update", "completed"]),
   local_update: new Set(["completed"]),
 });
 const LEGACY_PHASES = Object.freeze({
@@ -222,13 +229,56 @@ function migrateRunDocument(document) {
   if (!Number.isInteger(document.schema_version)) {
     throw new Error("run state schema_version 不合法");
   }
-  if (document.schema_version === 2) {
+  if (document.schema_version === 4) {
+    return {
+      document: clone(document),
+      migrated: false,
+    };
+  }
+  if (document.schema_version === 3) {
     const current = clone(document);
     if (!Array.isArray(current.consumed_approval_fingerprints)) {
       current.consumed_approval_fingerprints = [];
-      return { document: current, migrated: true };
     }
-    return { document: current, migrated: false };
+    if (!Array.isArray(current.attempted_github_action_fingerprints)) {
+      current.attempted_github_action_fingerprints = [];
+    }
+    current.schema_version = 4;
+    const inferredAction = {
+      pr_creation: "pr_create",
+      pr_update: "pr_update",
+      merge: "merge",
+      release: "release",
+    }[current.phase];
+    current.github_action_attempts =
+      current.attempted_github_action_fingerprints.map(
+        (approvalFingerprint, index, attempts) => ({
+          action:
+            inferredAction !== undefined && index === attempts.length - 1
+              ? inferredAction
+              : "unknown",
+          approval_fingerprint: approvalFingerprint,
+        }),
+      );
+    current.github_action_reconciliations = [];
+    return {
+      document: current,
+      migrated: true,
+    };
+  }
+  if (document.schema_version === 2) {
+    return {
+      document: {
+        ...clone(document),
+        schema_version: 4,
+        consumed_approval_fingerprints:
+          document.consumed_approval_fingerprints ?? [],
+        attempted_github_action_fingerprints: [],
+        github_action_attempts: [],
+        github_action_reconciliations: [],
+      },
+      migrated: true,
+    };
   }
   if (document.schema_version !== 1) {
     throw new Error(
@@ -242,10 +292,13 @@ function migrateRunDocument(document) {
   return {
     document: {
       ...clone(document),
-      schema_version: 2,
+      schema_version: 4,
       phase,
       consumed_approval_fingerprints:
         document.consumed_approval_fingerprints ?? [],
+      attempted_github_action_fingerprints: [],
+      github_action_attempts: [],
+      github_action_reconciliations: [],
     },
     migrated: true,
   };
@@ -262,7 +315,7 @@ export function createRun(
     throw new Error(`run 已存在：${runId}`);
   }
   const document = {
-    schema_version: 2,
+    schema_version: 4,
     run_id: runId,
     binding_id: safeBindingId,
     phase: "target_selection",
@@ -270,6 +323,9 @@ export function createRun(
     target: minimalTarget(target),
     approvals: [],
     consumed_approval_fingerprints: [],
+    attempted_github_action_fingerprints: [],
+    github_action_attempts: [],
+    github_action_reconciliations: [],
   };
   validateDocument("run-state", document);
   atomicWriteJson(path, document);
@@ -294,10 +350,214 @@ export function readRun(stateRoot, runId) {
   safeComponent(loaded.binding_id, "binding_id");
   const { document, migrated } = migrateRunDocument(loaded);
   validateDocument("run-state", document);
+  for (const reconciliation of document.github_action_reconciliations) {
+    validateDocument("github-action-reconciliation", reconciliation);
+  }
   if (migrated) {
     atomicWriteJson(path, document);
   }
   return document;
+}
+
+/** Validates one GitHub action against its active run and candidate. */
+function validateGithubActionRunBinding(
+  document,
+  preview,
+  approval,
+  {
+    providerContractHash,
+    now = new Date(),
+    attempted,
+  },
+) {
+  if (document.status !== "active") {
+    throw new InvalidStateTransition("terminal run 不可執行 GitHub action");
+  }
+  verifyGithubActionApproval(approval, preview, {
+    now,
+    requireFresh: attempted !== true,
+  });
+  const expectedPhase = GITHUB_ACTION_PHASES[preview.action];
+  if (expectedPhase === undefined || document.phase !== expectedPhase) {
+    throw new InvalidStateTransition(
+      `${preview.action} 與目前 run phase 不一致`,
+    );
+  }
+  if (
+    preview.state.run_id !== document.run_id ||
+    preview.state.binding_id !== document.binding_id ||
+    preview.state.repository !== document.target?.repository
+  ) {
+    throw new InvalidStateTransition(
+      "GitHub action 與目前 run identity 不一致",
+    );
+  }
+  if (
+    typeof providerContractHash !== "string" ||
+    preview.state.provider_contract_hash !== providerContractHash
+  ) {
+    throw new InvalidStateTransition("Provider contract 已漂移");
+  }
+  if (
+    !document.consumed_approval_fingerprints.includes(
+      approval.fingerprint,
+    )
+  ) {
+    throw new InvalidStateTransition(
+      "GitHub action approval 尚未由 lifecycle 預先消費",
+    );
+  }
+  const wasAttempted =
+    document.attempted_github_action_fingerprints.includes(
+      approval.fingerprint,
+    );
+  if (attempted !== wasAttempted) {
+    if (attempted) {
+      throw new InvalidStateTransition(
+        "GitHub action 尚未記錄遠端嘗試，不可 reconcile",
+      );
+    }
+    throw new InvalidStateTransition(
+      "GitHub action approval 已嘗試執行，不可重放",
+    );
+  }
+
+  const candidate = validateRunCandidate(document);
+  let expectedBaseBranch = candidate.repository_snapshot.base_ref;
+  let expectedBaseCommit = candidate.repository_snapshot.merge_base;
+  let expectedHeadCommit = candidate.repository_snapshot.head_commit;
+  if (preview.action === "release") {
+    validateDocument("merge-proof", document.merge_proof);
+    expectedBaseBranch = document.merge_proof.default_branch;
+    expectedBaseCommit = document.merge_proof.merge_commit;
+    expectedHeadCommit = document.merge_proof.merge_commit;
+    if (
+      document.release_version !==
+        preview.state.action_target.version
+    ) {
+      throw new InvalidStateTransition(
+        "Release version 與目前 run 不一致",
+      );
+    }
+  }
+  if (
+    preview.state.base_branch !== expectedBaseBranch ||
+    preview.state.base_commit !== expectedBaseCommit ||
+    preview.state.head_commit !== expectedHeadCommit ||
+    preview.state.diff_hash !== candidate.candidate_diff_hash
+  ) {
+    throw new InvalidStateTransition(
+      "GitHub action 與目前 candidate snapshot 不一致",
+    );
+  }
+  if (
+    ["pr_update", "merge"].includes(preview.action) &&
+    preview.state.action_target.pr_number !== document.pr_proof?.number
+  ) {
+    throw new InvalidStateTransition(
+      "GitHub action 與目前 Pull Request proof 不一致",
+    );
+  }
+  return candidate;
+}
+
+/** Reserves one already-authorized GitHub action before any remote mutation. */
+export function reserveGithubActionApply(
+  stateRoot,
+  runId,
+  preview,
+  approval,
+  { providerContractHash, now = new Date() } = {},
+) {
+  const root = resolve(stateRoot);
+  const initial = readRun(root, runId);
+  return withBindingLock(root, initial.binding_id, () => {
+    const document = readRun(root, runId);
+    validateGithubActionRunBinding(document, preview, approval, {
+      providerContractHash,
+      now,
+      attempted: false,
+    });
+    document.attempted_github_action_fingerprints.push(
+      approval.fingerprint,
+    );
+    document.github_action_attempts.push({
+      action: preview.action,
+      approval_fingerprint: approval.fingerprint,
+    });
+    validateDocument("run-state", document);
+    atomicWriteJson(runPath(root, runId), document);
+    return clone(document);
+  });
+}
+
+/** Authorizes a read-only recovery for one previously attempted action. */
+export function authorizeGithubActionReconcile(
+  stateRoot,
+  runId,
+  preview,
+  approval,
+  { providerContractHash } = {},
+) {
+  const root = resolve(stateRoot);
+  const initial = readRun(root, runId);
+  return withBindingLock(root, initial.binding_id, () => {
+    const document = readRun(root, runId);
+    validateGithubActionRunBinding(document, preview, approval, {
+      providerContractHash,
+      now: approval.confirmed_at,
+      attempted: true,
+    });
+    return clone(document);
+  });
+}
+
+/** Records a verified not-applied result that may authorize a fresh attempt. */
+export function recordGithubActionReconciliation(
+  stateRoot,
+  runId,
+  preview,
+  approval,
+  reconciliation,
+  { providerContractHash } = {},
+) {
+  const root = resolve(stateRoot);
+  const initial = readRun(root, runId);
+  return withBindingLock(root, initial.binding_id, () => {
+    const document = readRun(root, runId);
+    validateGithubActionRunBinding(document, preview, approval, {
+      providerContractHash,
+      now: approval.confirmed_at,
+      attempted: true,
+    });
+    validateDocument("github-action-reconciliation", reconciliation);
+    if (
+      reconciliation.action !== preview.action ||
+      reconciliation.repository !== document.target?.repository ||
+      reconciliation.approval_fingerprint !== approval.fingerprint ||
+      reconciliation.preview_fingerprint !== preview.fingerprint
+    ) {
+      throw new InvalidStateTransition(
+        "GitHub reconciliation 與目前 action 不一致",
+      );
+    }
+    const existing = document.github_action_reconciliations.find(
+      (item) =>
+        item.approval_fingerprint === approval.fingerprint,
+    );
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(reconciliation)) {
+        throw new InvalidStateTransition(
+          "GitHub reconciliation 結果已漂移",
+        );
+      }
+      return clone(document);
+    }
+    document.github_action_reconciliations.push(clone(reconciliation));
+    validateDocument("run-state", document);
+    atomicWriteJson(runPath(root, runId), document);
+    return clone(document);
+  });
 }
 
 /** Creates the persistent implementation lease for a binding. */
@@ -735,6 +995,41 @@ export function transitionRun(
       );
     }
     try {
+      const retryAction = {
+        pr_creation: "pr_create",
+        pr_update: "pr_update",
+        merge: "merge",
+        release: "release",
+      }[nextPhase];
+      if (nextPhase === document.phase && retryAction !== undefined) {
+        if (
+          document.github_action_attempts.some(
+            (attempt) => attempt.action === "unknown",
+          )
+        ) {
+          throw new InvalidStateTransition(
+            "舊版 GitHub action attempt 無法安全推斷，不可自動重試",
+          );
+        }
+        const priorAttempts = document.github_action_attempts.filter(
+          (attempt) => attempt.action === retryAction,
+        );
+        const latestAttempt = priorAttempts.at(-1);
+        if (
+          latestAttempt !== undefined &&
+          !document.github_action_reconciliations.some(
+            (item) =>
+              item.action === retryAction &&
+              item.approval_fingerprint ===
+                latestAttempt.approval_fingerprint &&
+              item.status === "not_applied",
+          )
+        ) {
+          throw new InvalidStateTransition(
+            `${retryAction} 上次嘗試尚未證明未寫入，不可重試`,
+          );
+        }
+      }
       Object.assign(document, clone(updates));
       requirePhaseEvidence(document, nextPhase);
       if (nextPhase === "release") {

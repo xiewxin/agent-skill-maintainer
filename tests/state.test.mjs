@@ -22,10 +22,13 @@ import {
   evaluateReleaseNoteCoverage,
 } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 import {
+  authorizeGithubActionReconcile,
   InvalidStateTransition,
   LockUnavailableError,
   createRun,
   readRun,
+  recordGithubActionReconciliation,
+  reserveGithubActionApply,
   transitionRun,
   withBindingLock,
 } from "../skills/agent-skill-maintainer/scripts/lib/state.mjs";
@@ -176,6 +179,9 @@ function actionEvidence(
   action,
   {
     headCommit = REPOSITORY_SNAPSHOT.head_commit,
+    baseCommit = action === "release"
+      ? headCommit
+      : REPOSITORY_SNAPSHOT.merge_base,
     runId = "run-001",
     actionTarget = action === "pr_update" || action === "merge"
       ? { pr_number: 1, summary: `${action} workflow improvement` }
@@ -189,6 +195,7 @@ function actionEvidence(
     repository: "example/skill",
     relationship: "managed",
     base_branch: "main",
+    base_commit: baseCommit,
     head_branch: "feature",
     head_commit: headCommit,
     diff_hash: CANDIDATE_SNAPSHOT.candidate_diff_hash,
@@ -196,9 +203,12 @@ function actionEvidence(
     release_enabled: true,
     provider_contract_hash: "provider123",
   });
+  const confirmedAt = new Date(Date.now() - 60_000);
   const approval = buildGithubActionApproval(preview, {
-    confirmedAt: "2026-01-01T00:00:00.000Z",
-    expiresAt: "2099-01-01T00:00:00.000Z",
+    confirmedAt: confirmedAt.toISOString(),
+    expiresAt: new Date(
+      confirmedAt.getTime() + 15 * 60 * 1000,
+    ).toISOString(),
   });
   return { action_preview: preview, approvals: [approval] };
 }
@@ -220,7 +230,7 @@ test("run state is minimal, versioned, and recoverable", () => {
       bindingId: "binding-001",
       target: { skill: "example-skill", repository: "example/skill" },
     });
-    assert.equal(created.schema_version, 2);
+    assert.equal(created.schema_version, 4);
     assert.equal(created.phase, "target_selection");
     assert.deepEqual(readRun(root, "run-001"), created);
     assert.doesNotMatch(JSON.stringify(created), /raw_transcript|secret/u);
@@ -316,6 +326,10 @@ test("full managed lifecycle includes PR update and local update", () => {
             headCommit: "merge123",
             actionTarget: {
               version: "v1.0.0",
+              title: "Agent Skill Maintainer v1.0.0",
+              notes: "Release notes.",
+              draft: false,
+              prerelease: false,
               release_note_coverage: RELEASE_COVERAGE,
             },
           }),
@@ -353,6 +367,151 @@ test("full managed lifecycle includes PR update and local update", () => {
   });
 });
 
+test("GitHub apply reservation binds the active run and blocks replay", () => {
+  withStateRoot((root) => {
+    createRun(root, {
+      runId: "run-001",
+      bindingId: "binding-001",
+      target: { skill: "example-skill", repository: "example/skill" },
+    });
+    for (const [phase, updates] of [
+      ["evidence_collection", {}],
+      ["feedback_validation", {}],
+      ["optimization_design", {}],
+      ["optimization_approval", {}],
+      [
+        "isolation",
+        {
+          repository_snapshot: REPOSITORY_SNAPSHOT,
+          approvals: [implementationApproval()],
+        },
+      ],
+      ["implementation", {}],
+      ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
+    ]) {
+      transitionRun(root, "run-001", phase, { updates });
+    }
+    const evidence = actionEvidence("pr_create");
+    transitionRun(root, "run-001", "pr_creation", {
+      updates: {
+        validation_summary: VALIDATION_SUMMARY,
+        ...evidence,
+      },
+    });
+    const approval = evidence.approvals[0];
+    const reserved = reserveGithubActionApply(
+      root,
+      "run-001",
+      evidence.action_preview,
+      approval,
+      {
+        providerContractHash: "provider123",
+      },
+    );
+    assert.deepEqual(
+      reserved.attempted_github_action_fingerprints,
+      [approval.fingerprint],
+    );
+    assert.deepEqual(reserved.github_action_attempts, [
+      {
+        action: "pr_create",
+        approval_fingerprint: approval.fingerprint,
+      },
+    ]);
+    const reconciled = authorizeGithubActionReconcile(
+      root,
+      "run-001",
+      evidence.action_preview,
+      approval,
+      {
+        providerContractHash: "provider123",
+      },
+    );
+    assert.equal(reconciled.phase, "pr_creation");
+    const blockedRetryApproval = buildGithubActionApproval(
+      evidence.action_preview,
+      {
+        confirmedAt: new Date(Date.now() - 90_000).toISOString(),
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      },
+    );
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "pr_creation", {
+          updates: {
+            validation_summary: VALIDATION_SUMMARY,
+            action_preview: evidence.action_preview,
+            approvals: [blockedRetryApproval],
+          },
+        }),
+      /尚未證明未寫入/u,
+    );
+    const absenceProof = {
+      schema_version: 1,
+      action: "pr_create",
+      repository: "example/skill",
+      approval_fingerprint: approval.fingerprint,
+      preview_fingerprint: evidence.action_preview.fingerprint,
+      observed_at: new Date().toISOString(),
+      status: "not_applied",
+      remote_state_hash: "c".repeat(64),
+    };
+    const recorded = recordGithubActionReconciliation(
+      root,
+      "run-001",
+      evidence.action_preview,
+      approval,
+      absenceProof,
+      {
+        providerContractHash: "provider123",
+      },
+    );
+    assert.deepEqual(recorded.github_action_reconciliations, [
+      absenceProof,
+    ]);
+    assert.throws(
+      () =>
+        reserveGithubActionApply(
+          root,
+          "run-001",
+          evidence.action_preview,
+          approval,
+          {
+            providerContractHash: "provider123",
+          },
+        ),
+      /不可重放/u,
+    );
+    const refreshedApproval = buildGithubActionApproval(
+      evidence.action_preview,
+      {
+        confirmedAt: new Date(Date.now() - 30_000).toISOString(),
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      },
+    );
+    transitionRun(root, "run-001", "pr_creation", {
+      updates: {
+        validation_summary: VALIDATION_SUMMARY,
+        action_preview: evidence.action_preview,
+        approvals: [refreshedApproval],
+      },
+    });
+    const retried = reserveGithubActionApply(
+      root,
+      "run-001",
+      evidence.action_preview,
+      refreshedApproval,
+      {
+        providerContractHash: "provider123",
+      },
+    );
+    assert.deepEqual(
+      retried.attempted_github_action_fingerprints,
+      [approval.fingerprint, refreshedApproval.fingerprint],
+    );
+  });
+});
+
 test("legacy v1 run migrates before current schema validation", () => {
   withStateRoot((root) => {
     const path = join(root, "runs", "run-001", "state.json");
@@ -371,9 +530,56 @@ test("legacy v1 run migrates before current schema validation", () => {
       "utf8",
     );
     const migrated = readRun(root, "run-001");
-    assert.equal(migrated.schema_version, 2);
+    assert.equal(migrated.schema_version, 4);
     assert.equal(migrated.phase, "pr_creation");
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), migrated);
+  });
+});
+
+test("legacy v3 attempts are conservatively mapped and block ambiguous retry", () => {
+  withStateRoot((root) => {
+    const path = join(root, "runs", "run-001", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        schema_version: 3,
+        run_id: "run-001",
+        binding_id: "binding-001",
+        phase: "merge",
+        status: "active",
+        target: {
+          skill: "example-skill",
+          repository: "example/skill",
+        },
+        approvals: [],
+        consumed_approval_fingerprints: [
+          "a".repeat(64),
+          "b".repeat(64),
+        ],
+        attempted_github_action_fingerprints: [
+          "a".repeat(64),
+          "b".repeat(64),
+        ],
+      })}\n`,
+      "utf8",
+    );
+
+    const migrated = readRun(root, "run-001");
+    assert.deepEqual(migrated.github_action_attempts, [
+      {
+        action: "unknown",
+        approval_fingerprint: "a".repeat(64),
+      },
+      {
+        action: "merge",
+        approval_fingerprint: "b".repeat(64),
+      },
+    ]);
+    assert.throws(
+      () => transitionRun(root, "run-001", "merge"),
+      /舊版 GitHub action attempt/u,
+    );
   });
 });
 
@@ -582,6 +788,7 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
       repository: "example/skill",
       relationship: "managed",
       base_branch: "main",
+      base_commit: REPOSITORY_SNAPSHOT.merge_base,
       head_branch: "feature",
       head_commit: REPOSITORY_SNAPSHOT.head_commit,
       diff_hash: CANDIDATE_SNAPSHOT.candidate_diff_hash,
@@ -591,7 +798,7 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
     });
     const expiredApproval = buildGithubActionApproval(preview, {
       confirmedAt: "2019-01-01T00:00:00.000Z",
-      expiresAt: "2020-01-01T00:00:00.000Z",
+      expiresAt: "2019-01-01T00:15:00.000Z",
     });
     assert.throws(
       () =>
@@ -664,12 +871,19 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
       () => transitionRun(root, "run-001", "pr_update"),
       /缺少 pr_update 獨立確認/u,
     );
+    const retryEvidence = actionEvidence("pr_update");
+    transitionRun(root, "run-001", "pr_update", {
+      updates: {
+        pr_proof: PR_PROOF,
+        ...retryEvidence,
+      },
+    });
     assert.throws(
       () =>
         transitionRun(root, "run-001", "pr_update", {
           updates: {
             pr_proof: PR_PROOF,
-            ...actionEvidence("pr_update"),
+            ...retryEvidence,
           },
         }),
       /確認已使用/u,
@@ -707,6 +921,10 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
       headCommit: "merge123",
       actionTarget: {
         version: "v1.0.0",
+        title: "Agent Skill Maintainer v1.0.0",
+        notes: "Release notes.",
+        draft: false,
+        prerelease: false,
         release_note_coverage: RELEASE_COVERAGE,
       },
     });

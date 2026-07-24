@@ -8,8 +8,23 @@
     "markers": [".bmad-core", "_bmad"],
     "version_files": [".bmad-core/core-config.yaml", "_bmad/_config/manifest.yaml"]
   },
-  "tested_versions": [],
-  "last_verified_at": null,
+  "tested_versions": ["v6.10.0"],
+  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "verification_evidence": [
+    {
+      "version": "v6.10.0",
+      "repository": "bmad-code-org/BMAD-METHOD",
+      "repository_status": "active",
+      "release_url": "https://github.com/bmad-code-org/BMAD-METHOD/releases/tag/v6.10.0",
+      "scope": "artifact-contract-read-only",
+      "artifacts": [
+        "src/core-skills/bmad-spec/SKILL.md",
+        "src/bmm-skills/2-plan-workflows/bmad-prd/SKILL.md",
+        "src/bmm-skills/3-solutioning/bmad-architecture/SKILL.md",
+        "src/bmm-skills/4-implementation/bmad-create-story/SKILL.md"
+      ]
+    }
+  ],
   "supported_platforms": [],
   "capabilities": ["quick-flow", "product-requirements", "architecture", "story"],
   "artifact_contracts": [

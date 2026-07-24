@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "blinded-forward-aggregate",
+  "evaluated_at": "2026-07-23T00:00:00.000Z",
+  "fixture": "synthetic/sample-cleanup",
+  "candidate_skill_fingerprint": "6b8329ebd5f800ead2b8c20f29497b3be2e72aa9494d6a3b385e687dce197a49",
+  "raw_outputs_published": false,
+  "forward_evaluation": {
+    "same_model_and_tools": true,
+    "expected_findings_hidden": true,
+    "required_behaviors": [
+      {
+        "id": "cleanup-defect",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "id": "publication-defect",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "id": "preference-does-not-justify-change",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "id": "stable-feedback-and-optimization-ids",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "id": "proposal-remains-deferred-before-user-decision",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "id": "analysis-does-not-modify-files",
+        "baseline": true,
+        "candidate": true
+      }
+    ],
+    "baseline_passed_behaviors": 4,
+    "candidate_passed_behaviors": 6,
+    "candidate_regressions": 0,
+    "false_positive_optimizations": 0,
+    "passed": true
+  },
+  "platform_validation": {
+    "installer": {
+      "name": "skills",
+      "version": "1.5.20",
+      "scope": "isolated-project-copy"
+    },
+    "platforms": [
+      {
+        "id": "codex",
+        "version": "codex-cli 0.139.0",
+        "explicit_trigger": true,
+        "target_and_reference_read": true,
+        "positive_analysis": true,
+        "negative_non_trigger": true,
+        "stable_ids": true,
+        "decision_boundary": true,
+        "files_modified": false,
+        "passed": true
+      },
+      {
+        "id": "claude-code",
+        "version": "2.1.152",
+        "explicit_trigger": true,
+        "target_and_reference_read": true,
+        "positive_analysis": true,
+        "negative_non_trigger": true,
+        "stable_ids": true,
+        "decision_boundary": true,
+        "files_modified": false,
+        "passed": true
+      }
+    ],
+    "passed": true
+  },
+  "limits": [
+    "The published evidence is an aggregate over a synthetic Skill and redacted evidence.",
+    "Raw model output and temporary installation paths are not published.",
+    "Platform validation covers installation, explicit triggering, negative non-triggering, and analysis-only behavior.",
+    "The live GitHub mutation lifecycle is tracked by a separate release gate."
+  ]
+}
