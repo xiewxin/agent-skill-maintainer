@@ -810,13 +810,15 @@ export function validateBranchPushCandidate(
   if (fingerprintCandidatePath(candidate) !== candidatePathFingerprint) {
     throw new Error("candidate canonical path fingerprint 已漂移");
   }
-  const repositoryRoot = realpathSync(
-    runGit(candidate, ["rev-parse", "--show-toplevel"], {
+  const repositoryPrefix = runGit(
+    candidate,
+    ["rev-parse", "--show-prefix"],
+    {
       readOnly: true,
       label: "Git candidate preflight",
-    }).trim(),
-  );
-  if (repositoryRoot !== candidate) {
+    },
+  ).trim();
+  if (repositoryPrefix !== "") {
     throw new Error("candidate 必須指向 Git 根目錄");
   }
   const safeBranch = validateBranchName(branch);

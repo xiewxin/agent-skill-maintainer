@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-24T05:55:11.000Z",
+  "evaluated_at": "2026-07-24T07:51:46.180Z",
   "fixture": "synthetic/sample-cleanup",
-  "candidate_skill_fingerprint": "efd0b2c5ac7c10a25e18c85b4eb56ccedab3115d8cae4b9f96522a462288b8c9",
+  "candidate_skill_fingerprint": "b13006f4c87ec934fdde4912a5196fab319647fa1afedd840408feee60545253",
   "raw_outputs_published": false,
   "forward_evaluation": {
     "same_model_and_tools": true,

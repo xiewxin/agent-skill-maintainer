@@ -532,6 +532,21 @@ test("branch push candidate preflight requires the exact clean committed candida
       expected.head_commit,
       fixture.candidateSnapshot.repository_snapshot.head_commit,
     );
+    const nested = join(fixture.candidate, "nested");
+    mkdirSync(nested);
+    assert.throws(
+      () =>
+        validateBranchPushCandidate(
+          nested,
+          fixture.candidateSnapshot,
+          {
+            candidatePathFingerprint: fingerprintCandidatePath(nested),
+            branch: fixture.branch,
+          },
+        ),
+      /candidate 必須指向 Git 根目錄/u,
+    );
+    rmSync(nested, { recursive: true, force: true });
     assert.throws(
       () =>
         validateBranchPushCandidate(
