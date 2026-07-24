@@ -42,7 +42,7 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
 
 test("all public schemas parse and lock an explicit version", () => {
-  assert.equal(SCHEMA_NAMES.length, 18);
+  assert.equal(SCHEMA_NAMES.length, 20);
   for (const schema of SCHEMA_NAMES) {
     const document = JSON.parse(
       readFileSync(
@@ -60,16 +60,19 @@ test("all public schemas parse and lock an explicit version", () => {
 });
 
 test("runtime schema validation rejects incomplete documents", () => {
-  assert.throws(() => validateDocument("run-state", { schema_version: 2 }));
+  assert.throws(() => validateDocument("run-state", { schema_version: 4 }));
   assert.equal(
     validateDocument("run-state", {
-      schema_version: 2,
+      schema_version: 4,
       run_id: "run-001",
       binding_id: "binding-001",
       phase: "target_selection",
       status: "active",
       approvals: [],
       consumed_approval_fingerprints: [],
+      attempted_github_action_fingerprints: [],
+      github_action_attempts: [],
+      github_action_reconciliations: [],
     }),
     true,
   );
@@ -449,17 +452,40 @@ test("documentation impact is structured, scoped, and contract-preserving", () =
   );
 });
 
-test("Provider profiles remain conservative and complete", () => {
+test("Provider profiles publish version-scoped read-only evidence", () => {
   const profiles = loadProviderProfiles(
     resolve(SKILL_ROOT, "assets", "providers"),
   );
   assert.deepEqual(Object.keys(profiles).sort(), [...PROVIDER_IDS].sort());
-  for (const profile of Object.values(profiles)) {
-    assert.deepEqual(profile.tested_versions, []);
-    assert.equal(profile.last_verified_at, null);
+  for (const [id, profile] of Object.entries(profiles)) {
     const missing = resolveProviderSupport(profile, { detectedVersion: null });
     assert.ok(["compatible-read-only", "unavailable"].includes(missing.status));
     assert.equal(missing.commands_allowed, false);
+    if (profile.role_type === "formal") {
+      assert.equal(profile.tested_versions.length, 1, id);
+      assert.equal(profile.verification_evidence.length, 1, id);
+      assert.equal(
+        profile.verification_evidence[0].version,
+        profile.tested_versions[0],
+        id,
+      );
+      assert.equal(
+        profile.verification_evidence[0].scope,
+        "artifact-contract-read-only",
+        id,
+      );
+      assert.ok(profile.verification_evidence[0].artifacts.length > 0, id);
+      assert.ok(Number.isFinite(Date.parse(profile.last_verified_at)), id);
+      const verified = resolveProviderSupport(profile, {
+        detectedVersion: profile.tested_versions[0],
+      });
+      assert.equal(verified.status, "verified", id);
+      assert.equal(verified.commands_allowed, false, id);
+    } else {
+      assert.deepEqual(profile.tested_versions, [], id);
+      assert.deepEqual(profile.verification_evidence, [], id);
+      assert.equal(profile.last_verified_at, null, id);
+    }
   }
   const unknown = resolveProviderSupport(profiles.superpowers, {
     detectedVersion: "999.0.0",
@@ -471,6 +497,10 @@ test("Provider profiles remain conservative and complete", () => {
     profiles["agents-doc-maintainer"].capabilities.includes(
       "generated-contract-preservation",
     ),
+  );
+  assert.equal(
+    profiles.gsd.verification_evidence[0].repository_status,
+    "archived",
   );
 });
 

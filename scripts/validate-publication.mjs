@@ -14,6 +14,7 @@ import {
   PROVIDER_IDS,
   SCHEMA_NAMES,
   loadProviderProfiles,
+  validateDocument,
 } from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -36,6 +37,8 @@ const REQUIRED_FILES = Object.freeze([
   ".github/ISSUE_TEMPLATE/bug.yml",
   ".github/ISSUE_TEMPLATE/config.yml",
   ".github/workflows/validation.yml",
+  "evals/evidence/preview-v0.1.0.json",
+  "skills/agent-skill-maintainer/assets/schemas/blinded-forward-aggregate.schema.json",
   "skills/agent-skill-maintainer/SKILL.md",
   "skills/agent-skill-maintainer/agents/openai.yaml",
   "skills/agent-skill-maintainer/scripts/maintainer.mjs",
@@ -214,6 +217,17 @@ export function validatePublication() {
     }
   } catch (error) {
     errors.push(`invalid package.json: ${error.message}`);
+  }
+  try {
+    const aggregate = JSON.parse(
+      readFileSync(
+        resolve(ROOT, "evals", "evidence", "preview-v0.1.0.json"),
+        "utf8",
+      ),
+    );
+    validateDocument("blinded-forward-aggregate", aggregate);
+  } catch (error) {
+    errors.push(`invalid forward evaluation aggregate: ${error.message}`);
   }
 
   for (const file of publicTextFiles()) {

@@ -8,18 +8,45 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  fingerprint,
+  loadProviderProfiles,
   SCHEMA_NAMES,
   selectTargets,
   validateDocument,
 } from "./lib/core.mjs";
-import { createRun, readRun } from "./lib/state.mjs";
+import {
+  applyGithubAction,
+  buildGithubActionApproval,
+  buildGithubActionPreview,
+  reconcileGithubAction,
+} from "./lib/github.mjs";
+import {
+  authorizeGithubActionReconcile,
+  createRun,
+  readRun,
+  recordGithubActionReconciliation,
+  reserveGithubActionApply,
+  transitionRun,
+} from "./lib/state.mjs";
 
 const DEFAULT_STATE_ROOT = resolve(homedir(), ".agent-skill-maintainer");
 
 /** Parses one command and rejects unknown or ambiguous arguments. */
 function parseArguments(argv) {
   const [command, ...tokens] = argv;
-  if (!["target", "start", "status", "validate"].includes(command)) {
+  if (
+    ![
+      "target",
+      "start",
+      "status",
+      "transition",
+      "validate",
+      "github-preview",
+      "github-approve",
+      "github-apply",
+      "github-reconcile",
+    ].includes(command)
+  ) {
     throw new Error("未知或缺少命令");
   }
   const values = {};
@@ -54,7 +81,31 @@ function parseArguments(argv) {
       "repository",
     ]),
     status: new Set(["state-root", "run-id"]),
+    transition: new Set([
+      "state-root",
+      "run-id",
+      "phase",
+      "updates",
+    ]),
     validate: new Set(["schema", "input"]),
+    "github-preview": new Set(["action", "state"]),
+    "github-approve": new Set([
+      "preview",
+      "confirmed-at",
+      "expires-at",
+    ]),
+    "github-apply": new Set([
+      "state-root",
+      "run-id",
+      "preview",
+      "approval",
+    ]),
+    "github-reconcile": new Set([
+      "state-root",
+      "run-id",
+      "preview",
+      "approval",
+    ]),
   }[command];
   const supplied = [
     ...Object.keys(values),
@@ -76,7 +127,21 @@ function required(values, name) {
   return value;
 }
 
-/** Executes a parsed local-only command. */
+/** Reads one JSON object from an explicit local file. */
+function readJsonFile(path, label) {
+  let document;
+  try {
+    document = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(`無法讀取 ${label}`, { cause: error });
+  }
+  if (document === null || typeof document !== "object" || Array.isArray(document)) {
+    throw new Error(`${label} 必須是 JSON object`);
+  }
+  return document;
+}
+
+/** Executes one parsed deterministic command. */
 function execute({ command, values, repeated }) {
   if (command === "target") {
     return selectTargets({
@@ -102,6 +167,17 @@ function execute({ command, values, repeated }) {
       required(values, "run-id"),
     );
   }
+  if (command === "transition") {
+    const updates = values.updates === undefined
+      ? {}
+      : readJsonFile(values.updates, "lifecycle updates");
+    return transitionRun(
+      values["state-root"] ?? DEFAULT_STATE_ROOT,
+      required(values, "run-id"),
+      required(values, "phase"),
+      { updates },
+    );
+  }
   if (command === "validate") {
     const schema = required(values, "schema");
     if (!SCHEMA_NAMES.includes(schema)) {
@@ -110,6 +186,83 @@ function execute({ command, values, repeated }) {
     const document = JSON.parse(readFileSync(required(values, "input"), "utf8"));
     validateDocument(schema, document);
     return { schema, valid: true };
+  }
+  if (command === "github-preview") {
+    return buildGithubActionPreview(
+      required(values, "action"),
+      readJsonFile(required(values, "state"), "GitHub action state"),
+    );
+  }
+  if (command === "github-approve") {
+    return buildGithubActionApproval(
+      readJsonFile(required(values, "preview"), "GitHub action preview"),
+      {
+        confirmedAt: required(values, "confirmed-at"),
+        expiresAt: required(values, "expires-at"),
+      },
+    );
+  }
+  if (command === "github-apply") {
+    const preview = readJsonFile(
+      required(values, "preview"),
+      "GitHub action preview",
+    );
+    const approval = readJsonFile(
+      required(values, "approval"),
+      "GitHub action approval",
+    );
+    const reserved = reserveGithubActionApply(
+      values["state-root"] ?? DEFAULT_STATE_ROOT,
+      required(values, "run-id"),
+      preview,
+      approval,
+      {
+        providerContractHash: fingerprint(loadProviderProfiles()),
+      },
+    );
+    const documentationImpact = reserved.validation_summary?.checks?.find(
+      (check) => check?.category === "documentation",
+    )?.details ?? null;
+    return applyGithubAction(preview, approval, { documentationImpact });
+  }
+  if (command === "github-reconcile") {
+    const preview = readJsonFile(
+      required(values, "preview"),
+      "GitHub action preview",
+    );
+    const approval = readJsonFile(
+      required(values, "approval"),
+      "GitHub action approval",
+    );
+    const active = authorizeGithubActionReconcile(
+      values["state-root"] ?? DEFAULT_STATE_ROOT,
+      required(values, "run-id"),
+      preview,
+      approval,
+      {
+        providerContractHash: fingerprint(loadProviderProfiles()),
+      },
+    );
+    const documentationImpact = active.validation_summary?.checks?.find(
+      (check) => check?.category === "documentation",
+    )?.details ?? null;
+    const result = reconcileGithubAction(preview, {
+      documentationImpact,
+      approvalFingerprint: approval.fingerprint,
+    });
+    if (result.status === "not_applied") {
+      recordGithubActionReconciliation(
+        values["state-root"] ?? DEFAULT_STATE_ROOT,
+        required(values, "run-id"),
+        preview,
+        approval,
+        result.absence_proof,
+        {
+          providerContractHash: fingerprint(loadProviderProfiles()),
+        },
+      );
+    }
+    return result;
   }
   throw new Error(`未知命令：${command}`);
 }

@@ -18,7 +18,7 @@ Each activated Provider needs version evidence, capability gap, unique owner, ex
 - BMAD: use the repository's active Quick Flow or product artifacts.
 - GSD: use the current project, requirement, roadmap, state, and phase artifacts.
 
-Skill Creator is auxiliary for trigger metadata, no-skill baseline, candidate A/B, and forward evaluation. Unknown or incompatible versions remain read-only or unavailable; never claim full support without verified evidence.
+Skill Creator is auxiliary for trigger metadata, no-skill baseline, candidate A/B, and forward evaluation. A Profile may mark a version verified only for the exact evidence scope recorded in `verification_evidence`; artifact-contract verification never authorizes Provider commands or implies end-to-end platform support. Unknown or incompatible versions remain read-only or unavailable. An archived upstream may still be read for an explicitly versioned artifact contract, but must be identified as archived and must not be presented as an actively maintained integration.
 
 Agents Doc Maintainer is an optional auxiliary specialist for root／module placement, contract-aware incremental maintenance, drift checks, and index validation. Activate it only when the candidate has a distinct agent-guidance gap. Its absence never blocks the native documentation contract in `agent-documentation.md`.
 

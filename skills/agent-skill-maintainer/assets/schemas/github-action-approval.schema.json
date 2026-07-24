@@ -4,7 +4,7 @@
   "title": "GitHub Action Confirmation",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "action", "preview_fingerprint", "run_id", "binding_id", "account", "repository", "relationship", "base_branch", "head_branch", "head_commit", "diff_hash", "action_target_hash", "release_enabled", "provider_contract_hash", "confirmed_at", "expires_at", "fingerprint"],
+  "required": ["schema_version", "action", "preview_fingerprint", "run_id", "binding_id", "account", "repository", "relationship", "base_branch", "base_commit", "head_branch", "head_commit", "diff_hash", "action_target_hash", "release_enabled", "provider_contract_hash", "confirmed_at", "expires_at", "fingerprint"],
   "properties": {
     "schema_version": {"type": "integer", "const": 1},
     "action": {"type": "string", "enum": ["pr_create", "pr_update", "merge", "release", "local_update"]},
@@ -15,6 +15,7 @@
     "repository": {"type": "string", "minLength": 1},
     "relationship": {"type": "string", "enum": ["managed", "contribute"]},
     "base_branch": {"type": "string", "minLength": 1},
+    "base_commit": {"type": "string", "minLength": 1},
     "head_branch": {"type": "string", "minLength": 1},
     "head_commit": {"type": "string", "minLength": 1},
     "diff_hash": {"type": "string", "minLength": 1},

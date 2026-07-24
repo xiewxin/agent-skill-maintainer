@@ -8,8 +8,23 @@
     "markers": [".planning"],
     "version_files": [".planning/STATE.md", ".planning/PROJECT.md"]
   },
-  "tested_versions": [],
-  "last_verified_at": null,
+  "tested_versions": ["v1.42.3"],
+  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "verification_evidence": [
+    {
+      "version": "v1.42.3",
+      "repository": "gsd-build/get-shit-done",
+      "repository_status": "archived",
+      "release_url": "https://github.com/gsd-build/get-shit-done/releases/tag/v1.42.3",
+      "scope": "artifact-contract-read-only",
+      "artifacts": [
+        "get-shit-done/templates/project.md",
+        "get-shit-done/templates/requirements.md",
+        "get-shit-done/templates/roadmap.md",
+        "get-shit-done/templates/state.md"
+      ]
+    }
+  ],
   "supported_platforms": [],
   "capabilities": ["project-context", "requirements", "roadmap", "phase-state"],
   "artifact_contracts": [

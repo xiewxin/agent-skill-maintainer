@@ -8,8 +8,24 @@
     "markers": [".codex/superpowers", "superpowers"],
     "version_files": ["VERSION", "package.json"]
   },
-  "tested_versions": [],
-  "last_verified_at": null,
+  "tested_versions": ["v6.1.1"],
+  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "verification_evidence": [
+    {
+      "version": "v6.1.1",
+      "repository": "obra/superpowers",
+      "repository_status": "active",
+      "release_url": "https://github.com/obra/superpowers/releases/tag/v6.1.1",
+      "scope": "artifact-contract-read-only",
+      "artifacts": [
+        "skills/brainstorming/SKILL.md",
+        "skills/writing-plans/SKILL.md",
+        "skills/test-driven-development/SKILL.md",
+        "skills/requesting-code-review/SKILL.md",
+        "skills/verification-before-completion/SKILL.md"
+      ]
+    }
+  ],
   "supported_platforms": [],
   "capabilities": ["brainstorming", "planning", "test-driven-development", "review", "verification"],
   "artifact_contracts": [
