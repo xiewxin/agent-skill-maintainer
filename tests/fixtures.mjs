@@ -1,6 +1,17 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  buildApproval,
+} from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
+import {
+  buildCandidateSnapshot,
+  buildRepositorySnapshot,
+  createIsolatedCandidate,
+  fingerprintTree,
+  runGit as runSafeGit,
+} from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 
 /** Runs Git in a test repository and returns trimmed stdout. */
 export function runGit(repository, ...arguments_) {
@@ -25,6 +36,24 @@ export function initializeRepository(repository) {
   writeFileSync(join(repository, "SKILL.md"), "base\n", "utf8");
   runGit(repository, "add", "SKILL.md");
   runGit(repository, "commit", "-m", "base");
+}
+
+/** Creates installed, source, and candidate roots for one isolated test. */
+export function createIsolationFixture({
+  prefix = "maintainer-git-",
+} = {}) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  const installed = join(root, "installed", "example-skill");
+  const source = join(root, "source");
+  const candidates = join(root, "candidates");
+  mkdirSync(installed, { recursive: true });
+  mkdirSync(candidates);
+  writeFileSync(join(installed, "SKILL.md"), "installed\n", "utf8");
+  initializeRepository(source);
+  writeFileSync(join(source, "SKILL.md"), "source\n", "utf8");
+  runGit(source, "add", "SKILL.md");
+  runGit(source, "commit", "-m", "source");
+  return { root, installed, source, candidates };
 }
 
 /** Returns one complete accepted optimization fixture. */
@@ -105,5 +134,197 @@ export function candidateFixture(overrides = {}) {
     diff_mapping_complete: true,
     isolated: true,
     ...overrides,
+  };
+}
+
+/** Builds a verified binding and approval for the current source head. */
+export function sourceApproval(
+  source,
+  installedFingerprint,
+  relationship = "managed",
+) {
+  const snapshot = buildRepositorySnapshot(source, { baseRef: "main" });
+  const optimization = optimizationFixture();
+  const binding = {
+    schema_version: 1,
+    binding_id: "binding-001",
+    skill: "example-skill",
+    source_repository: "example/skill",
+    installed_fingerprint: installedFingerprint,
+    install_method: "manual",
+    remote_verified: true,
+    relationship,
+    release_enabled: false,
+  };
+  const approval = buildApproval([optimization], {
+    runId: "run-001",
+    bindingId: binding.binding_id,
+    relationship,
+    repository: binding.source_repository,
+    headCommit: snapshot.head_commit,
+    diffHash: snapshot.diff_hash,
+    processArtifactPrefixes: snapshot.process_artifact_prefixes,
+  });
+  return { snapshot, optimization, binding, relationship, approval };
+}
+
+/** Creates one clean committed candidate suitable for branch-push tests. */
+export function createBranchPushFixture({
+  prefix = "maintainer-push-",
+  candidateName = "push-run",
+  branchName = "maintain/push-run",
+  relationship = "managed",
+} = {}) {
+  const fixture = createIsolationFixture({ prefix });
+  const installedFingerprint = fingerprintTree(fixture.installed);
+  const {
+    snapshot: repositorySnapshot,
+    optimization,
+    binding,
+    approval: implementationApproval,
+  } = sourceApproval(
+    fixture.source,
+    installedFingerprint,
+    relationship,
+  );
+  const isolated = createIsolatedCandidate({
+    installedPath: fixture.installed,
+    expectedInstalledFingerprint: installedFingerprint,
+    sourcePath: fixture.source,
+    candidateRoot: fixture.candidates,
+    candidateName,
+    branchName,
+    baseRef: "main",
+    repository: binding.source_repository,
+    runId: "run-001",
+    binding,
+    relationship,
+    optimizations: [optimization],
+    approval: implementationApproval,
+  });
+  runGit(isolated.candidate_path, "config", "user.name", "Test User");
+  runGit(
+    isolated.candidate_path,
+    "config",
+    "user.email",
+    "test@example.invalid",
+  );
+  runGit(
+    isolated.candidate_path,
+    "config",
+    "core.autocrlf",
+    "false",
+  );
+  writeFileSync(
+    join(isolated.candidate_path, "SKILL.md"),
+    "source\nbranch push\n",
+    "utf8",
+  );
+  runGit(isolated.candidate_path, "add", "SKILL.md");
+  runGit(isolated.candidate_path, "commit", "-m", "branch push");
+  const candidateSnapshot = buildCandidateSnapshot({
+    candidatePath: isolated.candidate_path,
+    installedPath: fixture.installed,
+    sourcePath: fixture.source,
+    baseRef: "main",
+    approvedOptIds: ["OPT-001"],
+    fileOptMap: { "SKILL.md": ["OPT-001"] },
+  });
+  return {
+    ...fixture,
+    candidate: isolated.candidate_path,
+    branch: isolated.branch,
+    binding,
+    implementationApproval,
+    repositorySnapshot,
+    candidateSnapshot,
+  };
+}
+
+/** Returns a deterministic GitHub CLI runner for branch-push tests. */
+export function branchPushGithubRunner(
+  state,
+  {
+    forkAvailable = true,
+    forkParent = state.repository,
+    forkPermission = "WRITE",
+    onSetupGit = () => {},
+  } = {},
+) {
+  return (arguments_, options = {}) => {
+    if (arguments_[0] === "api" && arguments_[1] === "user") {
+      return { status: 0, stdout: `${state.account}\n`, stderr: "" };
+    }
+    if (
+      arguments_[0] === "repo" &&
+      arguments_[1] === "view" &&
+      arguments_[2] === state.repository
+    ) {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: state.repository,
+          viewerPermission:
+            state.relationship === "managed" ? "ADMIN" : "READ",
+          defaultBranchRef: { name: state.base_branch },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "repo" &&
+      arguments_[1] === "view" &&
+      arguments_[2] === state.action_target.head_repository
+    ) {
+      if (!forkAvailable) {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "repository not found",
+        };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: state.action_target.head_repository,
+          viewerPermission: forkPermission,
+          parent: { nameWithOwner: forkParent },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] ===
+        `repos/${state.repository}/branches/${state.base_branch}`
+    ) {
+      return {
+        status: 0,
+        stdout: `${state.base_commit}\n`,
+        stderr: "",
+      };
+    }
+    if (arguments_[0] === "auth" && arguments_[1] === "setup-git") {
+      onSetupGit(options.environment);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    throw new Error(`unexpected gh call: ${arguments_.join(" ")}`);
+  };
+}
+
+/** Rewrites verified HTTPS remotes to local bare remotes for integration tests. */
+export function localRemoteGitRunner(
+  remoteMap,
+  { beforePush = () => {} } = {},
+) {
+  return (repository, arguments_, options) => {
+    if (arguments_[0] === "push") {
+      beforePush();
+    }
+    return runSafeGit(
+      repository,
+      arguments_.map((value) => remoteMap.get(value) ?? value),
+      options,
+    );
   };
 }

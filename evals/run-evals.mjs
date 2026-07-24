@@ -18,6 +18,48 @@ import {
 import { fingerprintTree } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
+  "analysis-does-not-modify-files",
+  "cleanup-defect",
+  "preference-does-not-justify-change",
+  "proposal-remains-deferred-before-user-decision",
+  "publication-defect",
+  "stable-feedback-and-optimization-ids",
+]);
+
+/** Validates the stable, publishable forward-evaluation fixture contract. */
+export function validateForwardEvaluationFixture(fixture) {
+  const targetFiles = fixture?.target_files;
+  const positive = fixture?.positive_expectations;
+  const negative = fixture?.negative_expectations;
+  const behaviorIds = [...(fixture?.required_behaviors ?? [])].sort();
+  return (
+    fixture?.schema_version === 1 &&
+    fixture?.id === "synthetic/sample-cleanup" &&
+    targetFiles !== null &&
+    typeof targetFiles === "object" &&
+    !Array.isArray(targetFiles) &&
+    Object.keys(targetFiles).sort().join(",") ===
+      "target-skill/SKILL.md,target-skill/references/publication.md" &&
+    Object.values(targetFiles).every(
+      (content) => typeof content === "string" && content.length > 0,
+    ) &&
+    typeof fixture?.positive_prompt === "string" &&
+    fixture.positive_prompt.includes("$agent-skill-maintainer") &&
+    typeof fixture?.negative_prompt === "string" &&
+    fixture.negative_prompt.length > 0 &&
+    JSON.stringify(behaviorIds) ===
+      JSON.stringify(REQUIRED_FORWARD_BEHAVIOR_IDS) &&
+    positive?.minimum_defect_findings === 3 &&
+    positive?.minimum_deferred_optimizations === 3 &&
+    positive?.preference_feedback_without_optimization === true &&
+    positive?.target_and_reference_read === true &&
+    positive?.files_modified === false &&
+    negative?.maintainer_triggered === false &&
+    negative?.files_modified === false &&
+    fixture?.raw_outputs_published === false
+  );
+}
 
 /** Validates one publishable blinded forward-evaluation aggregate. */
 export function validateForwardEvaluationAggregate(
@@ -27,14 +69,6 @@ export function validateForwardEvaluationAggregate(
   validateDocument("blinded-forward-aggregate", aggregate);
   const behaviors = aggregate?.forward_evaluation?.required_behaviors ?? [];
   const platforms = aggregate?.platform_validation?.platforms ?? [];
-  const requiredBehaviorIds = [
-    "analysis-does-not-modify-files",
-    "cleanup-defect",
-    "preference-does-not-justify-change",
-    "proposal-remains-deferred-before-user-decision",
-    "publication-defect",
-    "stable-feedback-and-optimization-ids",
-  ];
   const behaviorIds = behaviors
     .map((behavior) => behavior.id)
     .sort();
@@ -52,11 +86,13 @@ export function validateForwardEvaluationAggregate(
     aggregate.schema_version === 1 &&
     aggregate.evidence_kind === "blinded-forward-aggregate" &&
     Number.isFinite(Date.parse(aggregate.evaluated_at)) &&
+    aggregate.fixture === "synthetic/sample-cleanup" &&
     aggregate.candidate_skill_fingerprint === currentSkillFingerprint &&
     aggregate.raw_outputs_published === false &&
     aggregate.forward_evaluation?.same_model_and_tools === true &&
     aggregate.forward_evaluation?.expected_findings_hidden === true &&
-    JSON.stringify(behaviorIds) === JSON.stringify(requiredBehaviorIds) &&
+    JSON.stringify(behaviorIds) ===
+      JSON.stringify(REQUIRED_FORWARD_BEHAVIOR_IDS) &&
     behaviors.every(
       (behavior) =>
         typeof behavior.id === "string" &&
@@ -144,6 +180,19 @@ export function main(argv = process.argv.slice(2)) {
   const cases = JSON.parse(
     readFileSync(resolve(ROOT, "evals", "cases", "triggering.json"), "utf8"),
   );
+  const forwardFixture = JSON.parse(
+    readFileSync(
+      resolve(
+        ROOT,
+        "evals",
+        "cases",
+        "sample-cleanup-forward.json",
+      ),
+      "utf8",
+    ),
+  );
+  const forwardFixtureContractPassed =
+    validateForwardEvaluationFixture(forwardFixture);
   const labels = new Set(cases.map((item) => item.label));
   const requiredLabels = ["explicit", "paraphrase", "missing-target", "negative"];
   const triggerContractPassed =
@@ -214,6 +263,9 @@ export function main(argv = process.argv.slice(2)) {
     );
   const forwardAggregate = loadForwardEvaluationAggregate();
   const releaseBlockers = ["controlled_github_e2e_pending"];
+  if (!forwardFixtureContractPassed) {
+    releaseBlockers.push("forward_fixture_contract_pending");
+  }
   if (!forwardAggregate.forward.passed) {
     releaseBlockers.push("agent_forward_evaluation_pending");
   }
@@ -227,6 +279,7 @@ export function main(argv = process.argv.slice(2)) {
     passed:
       triggerContractPassed &&
       realUsageContractPassed &&
+      forwardFixtureContractPassed &&
       gate.allowed &&
       forwardAggregate.forward.passed &&
       forwardAggregate.platform.passed &&
@@ -235,6 +288,7 @@ export function main(argv = process.argv.slice(2)) {
     trigger_contract_passed: triggerContractPassed,
     redacted_real_usage_cases: 1,
     real_usage_contract_passed: realUsageContractPassed,
+    forward_fixture_contract_passed: forwardFixtureContractPassed,
     publication_gate: gate,
     provider_version_validation: {
       passed: providerVersionValidationPassed,

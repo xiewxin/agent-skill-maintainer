@@ -140,6 +140,22 @@ const PR_PROOF = Object.freeze({
   documentation_impact: DOCUMENTATION_IMPACT,
 });
 
+const BRANCH_PUSH_PROOF = Object.freeze({
+  schema_version: 1,
+  repository: "example/skill",
+  head_repository: "example/skill",
+  relationship: "managed",
+  base_branch: "main",
+  base_commit: REPOSITORY_SNAPSHOT.merge_base,
+  branch: "feature",
+  commit: REPOSITORY_SNAPSHOT.head_commit,
+  candidate_diff_hash: CANDIDATE_SNAPSHOT.candidate_diff_hash,
+  previous_remote_commit: null,
+  operation: "create",
+  forced: false,
+  verified: true,
+});
+
 const RELEASE_COVERAGE = Object.freeze(
   evaluateReleaseNoteCoverage(
     {
@@ -183,9 +199,16 @@ function actionEvidence(
       ? headCommit
       : REPOSITORY_SNAPSHOT.merge_base,
     runId = "run-001",
-    actionTarget = action === "pr_update" || action === "merge"
-      ? { pr_number: 1, summary: `${action} workflow improvement` }
-      : { title: `${action} workflow improvement` },
+    actionTarget = action === "branch_push"
+      ? {
+          candidate_path_fingerprint: "d".repeat(64),
+          expected_remote_commit: null,
+          head_repository: "example/skill",
+          operation: "create",
+        }
+      : action === "pr_update" || action === "merge"
+        ? { pr_number: 1, summary: `${action} workflow improvement` }
+        : { title: `${action} workflow improvement` },
   } = {},
 ) {
   const preview = buildGithubActionPreview(action, {
@@ -230,7 +253,7 @@ test("run state is minimal, versioned, and recoverable", () => {
       bindingId: "binding-001",
       target: { skill: "example-skill", repository: "example/skill" },
     });
-    assert.equal(created.schema_version, 4);
+    assert.equal(created.schema_version, 5);
     assert.equal(created.phase, "target_selection");
     assert.deepEqual(readRun(root, "run-001"), created);
     assert.doesNotMatch(JSON.stringify(created), /raw_transcript|secret/u);
@@ -291,8 +314,16 @@ test("full managed lifecycle includes PR update and local update", () => {
       ["implementation", {}],
       ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
       [
+        "branch_push",
+        {
+          validation_summary: VALIDATION_SUMMARY,
+          ...actionEvidence("branch_push"),
+        },
+      ],
+      [
         "pr_creation",
         {
+          branch_push_proof: BRANCH_PUSH_PROOF,
           validation_summary: VALIDATION_SUMMARY,
           ...actionEvidence("pr_create"),
         },
@@ -388,12 +419,20 @@ test("GitHub apply reservation binds the active run and blocks replay", () => {
       ],
       ["implementation", {}],
       ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
+      [
+        "branch_push",
+        {
+          validation_summary: VALIDATION_SUMMARY,
+          ...actionEvidence("branch_push"),
+        },
+      ],
     ]) {
       transitionRun(root, "run-001", phase, { updates });
     }
     const evidence = actionEvidence("pr_create");
     transitionRun(root, "run-001", "pr_creation", {
       updates: {
+        branch_push_proof: BRANCH_PUSH_PROOF,
         validation_summary: VALIDATION_SUMMARY,
         ...evidence,
       },
@@ -512,7 +551,7 @@ test("GitHub apply reservation binds the active run and blocks replay", () => {
   });
 });
 
-test("legacy v1 run migrates before current schema validation", () => {
+test("legacy terminal run migrates before current schema validation", () => {
   withStateRoot((root) => {
     const path = join(root, "runs", "run-001", "state.json");
     mkdirSync(dirname(path), { recursive: true });
@@ -522,21 +561,21 @@ test("legacy v1 run migrates before current schema validation", () => {
         schema_version: 1,
         run_id: "run-001",
         binding_id: "binding-001",
-        phase: "waiting_ci",
-        status: "active",
+        phase: "completed",
+        status: "completed",
         target: { skill: "example-skill" },
         approvals: [],
       }),
       "utf8",
     );
     const migrated = readRun(root, "run-001");
-    assert.equal(migrated.schema_version, 4);
-    assert.equal(migrated.phase, "pr_creation");
+    assert.equal(migrated.schema_version, 5);
+    assert.equal(migrated.phase, "completed");
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), migrated);
   });
 });
 
-test("legacy v3 attempts are conservatively mapped and block ambiguous retry", () => {
+test("legacy active remote stages are rejected without branch push proof", () => {
   withStateRoot((root) => {
     const path = join(root, "runs", "run-001", "state.json");
     mkdirSync(dirname(path), { recursive: true });
@@ -565,20 +604,9 @@ test("legacy v3 attempts are conservatively mapped and block ambiguous retry", (
       "utf8",
     );
 
-    const migrated = readRun(root, "run-001");
-    assert.deepEqual(migrated.github_action_attempts, [
-      {
-        action: "unknown",
-        approval_fingerprint: "a".repeat(64),
-      },
-      {
-        action: "merge",
-        approval_fingerprint: "b".repeat(64),
-      },
-    ]);
     assert.throws(
-      () => transitionRun(root, "run-001", "merge"),
-      /舊版 GitHub action attempt/u,
+      () => readRun(root, "run-001"),
+      /缺少 branch push proof/u,
     );
   });
 });
@@ -750,38 +778,35 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
       () =>
         transitionRun(root, "run-001", "pr_creation", {
           updates: {
-            candidate_snapshot: CANDIDATE_SNAPSHOT,
             validation_summary: VALIDATION_SUMMARY,
             ...actionEvidence("pr_create"),
+          },
+        }),
+      /不可由 validation/u,
+    );
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "branch_push", {
+          updates: {
+            candidate_snapshot: CANDIDATE_SNAPSHOT,
+            validation_summary: VALIDATION_SUMMARY,
+            ...actionEvidence("branch_push"),
           },
         }),
       /不允許更新欄位/u,
     );
     assert.throws(
       () =>
-        transitionRun(root, "run-001", "pr_creation", {
+        transitionRun(root, "run-001", "branch_push", {
           updates: {
             validation_summary: VALIDATION_SUMMARY,
-            ...actionEvidence("pr_create", { runId: "run-002" }),
+            ...actionEvidence("branch_push", { runId: "run-002" }),
           },
         }),
       /目前候選狀態不一致/u,
     );
-    assert.throws(
-      () =>
-        transitionRun(root, "run-001", "pr_creation", {
-          updates: {
-            validation_summary: {
-              ...VALIDATION_SUMMARY,
-              checks: [],
-            },
-            ...actionEvidence("pr_create"),
-          },
-        }),
-      /重建|必要類別|檢查|required_check_ids/u,
-    );
 
-    const preview = buildGithubActionPreview("pr_create", {
+    const preview = buildGithubActionPreview("branch_push", {
       run_id: "run-001",
       binding_id: "binding-001",
       account: "example-user",
@@ -792,7 +817,12 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
       head_branch: "feature",
       head_commit: REPOSITORY_SNAPSHOT.head_commit,
       diff_hash: CANDIDATE_SNAPSHOT.candidate_diff_hash,
-      action_target: { title: "expired approval" },
+      action_target: {
+        candidate_path_fingerprint: "d".repeat(64),
+        expected_remote_commit: null,
+        head_repository: "example/skill",
+        operation: "create",
+      },
       release_enabled: true,
       provider_contract_hash: "provider123",
     });
@@ -802,7 +832,7 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
     });
     assert.throws(
       () =>
-        transitionRun(root, "run-001", "pr_creation", {
+        transitionRun(root, "run-001", "branch_push", {
           updates: {
             validation_summary: VALIDATION_SUMMARY,
             action_preview: preview,
@@ -810,6 +840,22 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
           },
         }),
       /過期/u,
+    );
+    transitionRun(root, "run-001", "branch_push", {
+      updates: {
+        validation_summary: VALIDATION_SUMMARY,
+        ...actionEvidence("branch_push"),
+      },
+    });
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "pr_creation", {
+          updates: {
+            validation_summary: VALIDATION_SUMMARY,
+            ...actionEvidence("pr_create"),
+          },
+        }),
+      /Branch push proof|branch-push-proof/u,
     );
   });
 });
@@ -836,8 +882,16 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
       ["implementation", {}],
       ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
       [
+        "branch_push",
+        {
+          validation_summary: VALIDATION_SUMMARY,
+          ...actionEvidence("branch_push"),
+        },
+      ],
+      [
         "pr_creation",
         {
+          branch_push_proof: BRANCH_PUSH_PROOF,
           validation_summary: VALIDATION_SUMMARY,
           ...actionEvidence("pr_create"),
         },

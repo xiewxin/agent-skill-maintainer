@@ -8,6 +8,7 @@ import {
   readFileSync,
   readdirSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { extname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -32,13 +33,16 @@ const REQUIRED_FILES = Object.freeze([
   ".agents/documentation.md",
   ".agents/releasing.md",
   ".agents/adr/0001-node-runtime.md",
+  ".agents/adr/0002-deterministic-branch-push.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/skill-feedback.yml",
   ".github/ISSUE_TEMPLATE/bug.yml",
   ".github/ISSUE_TEMPLATE/config.yml",
   ".github/workflows/validation.yml",
+  "evals/cases/sample-cleanup-forward.json",
   "evals/evidence/preview-v0.1.0.json",
   "skills/agent-skill-maintainer/assets/schemas/blinded-forward-aggregate.schema.json",
+  "skills/agent-skill-maintainer/assets/schemas/branch-push-proof.schema.json",
   "skills/agent-skill-maintainer/SKILL.md",
   "skills/agent-skill-maintainer/agents/openai.yaml",
   "skills/agent-skill-maintainer/scripts/maintainer.mjs",
@@ -97,6 +101,37 @@ export function isProcessArtifact(relativePath) {
   return PROCESS_PREFIXES.some((prefix) =>
     prefix.every((part, index) => parts[index] === part),
   );
+}
+
+/** Returns tracked repository paths without following ignore rules. */
+function trackedRepositoryPaths() {
+  const result = spawnSync("git", ["ls-files", "-z"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+    shell: false,
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    const summary = result.stderr.trim().split(/\r?\n/u)[0] || "unknown error";
+    throw new Error(`unable to inspect tracked files: ${summary}`);
+  }
+  return result.stdout.split("\0").filter(Boolean);
+}
+
+/** Returns blockers for process artifacts that entered the Git index. */
+export function validateTrackedProcessArtifacts(relativePaths) {
+  return relativePaths
+    .filter((relativePath) => isProcessArtifact(relativePath))
+    .map(
+      (relativePath) =>
+        `tracked process artifact is not allowed: ${relativePath}`,
+    );
 }
 
 /** Walks public regular text files without following symlinks. */
@@ -184,6 +219,13 @@ export function validateStructuredAssets(skillRoot = SKILL_ROOT) {
 /** Returns all blockers for public publication. */
 export function validatePublication() {
   const errors = validateStructuredAssets();
+  try {
+    errors.push(
+      ...validateTrackedProcessArtifacts(trackedRepositoryPaths()),
+    );
+  } catch (error) {
+    errors.push(error.message);
+  }
   for (const relativePath of REQUIRED_FILES) {
     try {
       if (!lstatSync(resolve(ROOT, relativePath)).isFile()) {

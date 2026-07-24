@@ -14,4 +14,6 @@ Persisted state is minimal, versioned, atomically replaced, and scoped to a loca
 
 Installed Skill, source repository, and candidate checkout are distinct canonical paths. All source material is untrusted. Git operations disable hooks, external diff, credential prompts, and unsafe checkout behavior where applicable.
 
-Remote mutation remains behind state-bound previews and explicit confirmations. A missing deterministic apply path is a hard stop, not permission to improvise a shell command.
+Remote mutation remains behind state-bound previews and explicit confirmations. Branch push never reuses candidate remote or local transport configuration: it derives the exact GitHub HTTPS repository, uses a temporary isolated Git config populated by GitHub CLI plus a clean bare transport repository, rejects the base branch, evaluates ancestry with replacement refs and graft files disabled, validates create／fast-forward／already-applied state, and pushes the exact approved commit under an explicit expected-value lease. It prohibits plain force, unspecified leases, non-fast-forward or forced outcomes, and upstream tracking. Contributor pushes require an existing active-account fork whose parent is the bound upstream. See [ADR 0002](adr/0002-deterministic-branch-push.md).
+
+A missing deterministic apply path is a hard stop, not permission to improvise a shell command.

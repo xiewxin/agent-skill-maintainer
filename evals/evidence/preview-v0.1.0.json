@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-23T00:00:00.000Z",
+  "evaluated_at": "2026-07-24T07:51:46.180Z",
   "fixture": "synthetic/sample-cleanup",
-  "candidate_skill_fingerprint": "6b8329ebd5f800ead2b8c20f29497b3be2e72aa9494d6a3b385e687dce197a49",
+  "candidate_skill_fingerprint": "b13006f4c87ec934fdde4912a5196fab319647fa1afedd840408feee60545253",
   "raw_outputs_published": false,
   "forward_evaluation": {
     "same_model_and_tools": true,
@@ -82,6 +82,7 @@
   },
   "limits": [
     "The published evidence is an aggregate over a synthetic Skill and redacted evidence.",
+    "The stable synthetic forward fixture is published at evals/cases/sample-cleanup-forward.json.",
     "Raw model output and temporary installation paths are not published.",
     "Platform validation covers installation, explicit triggering, negative non-triggering, and analysis-only behavior.",
     "The live GitHub mutation lifecycle is tracked by a separate release gate."

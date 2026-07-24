@@ -30,6 +30,7 @@ export const SCHEMA_NAMES = Object.freeze([
   "provider-selection",
   "repository-snapshot",
   "candidate-snapshot",
+  "branch-push-proof",
   "validation",
   "pr-proof",
   "merge-proof",
@@ -1276,6 +1277,64 @@ export function validateCandidateSnapshotContract(candidateSnapshot) {
     excludedPrefixes: candidate.process_artifact_prefixes,
   });
   return candidate;
+}
+
+/** Validates branch-push proof against the current candidate and target. */
+export function validateBranchPushProofContract(
+  branchPushProof,
+  candidateSnapshot,
+  {
+    repository,
+    relationship,
+    baseBranch,
+    baseCommit,
+    headBranch,
+    headRepository,
+  },
+) {
+  if (!isObject(branchPushProof)) {
+    throw new Error("Branch push proof 必須是 object");
+  }
+  const candidate = validateCandidateSnapshotContract(candidateSnapshot);
+  const proof = clone(branchPushProof);
+  validateDocument("branch-push-proof", proof);
+  if (
+    proof.repository !== repository ||
+    proof.relationship !== relationship ||
+    proof.base_branch !== baseBranch ||
+    proof.base_commit !== baseCommit ||
+    proof.branch !== headBranch ||
+    proof.head_repository !== headRepository ||
+    proof.commit !== candidate.repository_snapshot.head_commit ||
+    proof.candidate_diff_hash !== candidate.candidate_diff_hash ||
+    proof.forced !== false ||
+    proof.verified !== true
+  ) {
+    throw new Error(
+      "Branch push proof 與目前倉庫、候選或遠端分支不一致",
+    );
+  }
+  if (
+    proof.operation === "create" &&
+    proof.previous_remote_commit !== null
+  ) {
+    throw new Error("Branch create proof 不可包含舊遠端提交");
+  }
+  if (
+    proof.operation === "fast-forward" &&
+    (typeof proof.previous_remote_commit !== "string" ||
+      proof.previous_remote_commit.length === 0 ||
+      proof.previous_remote_commit === proof.commit)
+  ) {
+    throw new Error("Branch fast-forward proof 缺少有效舊遠端提交");
+  }
+  if (
+    proof.operation === "verify-existing" &&
+    proof.previous_remote_commit !== proof.commit
+  ) {
+    throw new Error("Branch verify proof 的遠端提交不一致");
+  }
+  return proof;
 }
 
 /** Rebuilds a PR-ready validation result and requires all forward categories. */

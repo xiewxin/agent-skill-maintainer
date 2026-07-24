@@ -14,7 +14,7 @@ Use the user's language for analysis and confirmation. Use the target repository
 
 ## Lifecycle
 
-`target_selection → evidence_collection → feedback_validation → optimization_design → optimization_approval → isolation → implementation → validation → pr_creation → pr_update → merge → release → local_update`
+`target_selection → evidence_collection → feedback_validation → optimization_design → optimization_approval → isolation → implementation → validation → branch_push → pr_creation → pr_update → merge → release → local_update`
 
 Every forward transition consumes versioned upstream output. Missing fields, stale state, or fingerprint drift returns to the owning stage instead of being guessed downstream.
 
@@ -26,10 +26,12 @@ Create the candidate with `clone --no-checkout`, disabled hooks, disabled global
 
 ## Action confirmations
 
-Implementation, PR creation, PR update, merge, release, local update, and cleanup are distinct actions. Bind each confirmation to the active run, binding, account, repository, relationship, base/head branches and commits, Diff hash, action target, Provider contracts, and expiry. Consume a confirmation after one successful transition; repeating the same action requires a new preview and confirmation even when the target is unchanged.
+Implementation, branch push, PR creation, PR update, merge, release, local update, and cleanup are distinct actions. Bind each confirmation to the active run, binding, account, repository, relationship, base/head branches and commits, Diff hash, action target, Provider contracts, and expiry. Consume a confirmation after one successful transition; repeating the same action requires a new preview and confirmation even when the target is unchanged.
+
+Branch push requires a clean fully committed candidate whose canonical path fingerprint, non-base branch, HEAD, snapshot and Diff still match the active run. `managed` targets the verified upstream repository. `contribute` targets only an existing writable fork owned by the active account whose parent is the verified upstream. Missing forks block; the Preview does not create them. Remote branch creation and fast-forward use the exact approved commit plus an explicit expected-value lease as a compare-and-swap guard; already-at-commit verification does not write. Divergence, remote-prestate drift, non-fast-forward updates, and forced outcomes block.
 
 Abort invalidates approvals but does not delete candidate work. Cleanup requires a separate preview containing the exact run and resources.
 
 Local run state is versioned and written atomically. A short operation lock serializes state writes; entering isolated implementation also acquires a persistent lease for the binding. Another run cannot implement the same binding until the owning run reaches a terminal state. A stale short lock may be recovered only when its owner process no longer exists.
 
-The current lifecycle state schema uses the full stage names above. Legacy Preview states are migrated deterministically before current-schema validation; unknown versions or phases are blocked instead of guessed.
+The current lifecycle state schema uses the full stage names above. Legacy Preview states are migrated deterministically before current-schema validation when every required proof can be preserved. A known active remote-action state that predates branch-push proof is blocked with recovery guidance because the missing proof cannot be inferred safely; unknown versions or phases are blocked instead of guessed.

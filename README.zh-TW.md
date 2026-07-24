@@ -6,7 +6,7 @@ Agent Skill Maintainer 檢視任務中實際發生的事情，而不只相信 Sk
 
 [English](README.md)
 
-> **Preview：** 本機分析、隔離候選實作、發布 gate，以及經確認的 GitHub PR／合併／Release apply 已完成實作。Git branch push、本機 Skill 更新與完整真實生命週期仍在驗證中。
+> **Preview：** 本機分析、隔離候選實作、發布 gate，以及分別確認的 GitHub branch push／PR／合併／Release apply 已完成實作。本機 Skill 更新與完整真實生命週期仍在驗證中。
 
 ## 它能做什麼
 
@@ -17,7 +17,7 @@ Agent Skill Maintainer 檢視任務中實際發生的事情，而不只相信 Sk
 - **把證據轉成最小改善**：明確定義範圍、預期閉環與回歸案例。
 - **不碰已安裝版本也能實作**：只有在獨立確認後，才於隔離 clone 修改。
 - **完整檢查候選版本**：驗證回歸、安全、文件影響、可量測增益，以及過程檔或私密資料是否意外混入。
-- **控制發布風險**：支援的 PR、合併與 Release 動作都有獨立預覽及確認。
+- **控制發布風險**：branch push、PR、合併與 Release 都有獨立預覽及確認；管理者推到已驗證倉庫，貢獻者只推到自己已驗證且既存的 Fork。
 
 它適合維護既有 Agent Skill；不是一般程式碼審查工具、全新 Skill 產生器，也不會在背景自動掃描所有 Skill。
 
@@ -60,7 +60,7 @@ OPT-001 優先依倉庫／使用者語言選擇，再使用 fallback。
 | 人工決策 | 每個候選都有 `accepted`、`rejected`、`deferred` 或 `needs_evidence` 結論 |
 | 候選實作 | 經獨立確認的隔離 clone；已安裝及目前執行中的 Skill 保持不變 |
 | 完整驗證 | Diff 映射，以及安全、回歸、文件、可量測增益、隱私與倉庫衛生檢查 |
-| 發布控制 | 綁定狀態的預覽，以及每個支援的 GitHub 寫入動作各自確認 |
+| 發布控制 | 綁定狀態的預覽、branch-push proof，以及每個支援的 GitHub 寫入動作各自確認 |
 
 ## 為什麼不直接修改 Skill
 
@@ -77,7 +77,7 @@ Agent Skill Maintainer 補上的是完整維護閉環：
         ↓
 隔離實作 → 測試 → 完整 Diff 審查
         ↓
-分別確認 PR → 合併 → 發布
+確認 branch push → PR → 合併 → 發布
 ```
 
 若相容的計畫或評測 Provider 能補上已驗證的能力缺口，工作流可以使用它們；每份正式產物仍只有一個 owner。沒有實際增益時，會維持原生流程。
@@ -122,24 +122,26 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs validate \
 
 狀態預設寫入 `~/.agent-skill-maintainer`；可用 `--state-root` 指定隔離位置。這些命令不會執行 Provider 命令。
 
-GitHub 動作分成三個獨立步驟：建立綁定狀態的預覽、只在明確確認後建立限時 approval，最後才從相符的 active run 執行 apply。生命週期會先消費 approval；apply 記錄單次嘗試後，才重新檢查 active account、權限、base／head commit 與 branch 或 PR：
+GitHub 動作分成三個獨立步驟：建立綁定狀態的預覽、只在明確確認後建立限時 approval，最後才從相符的 active run 執行 apply。生命週期會先消費 approval；apply 記錄單次嘗試後，才重新檢查 active account、權限、base／head commit 與 branch 或 PR。建立 PR 預覽前，需先以獨立確認推送已完整提交且乾淨的候選分支：
 
 ```bash
 node skills/agent-skill-maintainer/scripts/maintainer.mjs github-preview \
-  --action pr_create --state github-action-state.json
+  --action branch_push --state branch-push-state.json \
+  --candidate "$CANDIDATE"
 node skills/agent-skill-maintainer/scripts/maintainer.mjs github-approve \
   --preview github-preview.json \
   --confirmed-at "$CONFIRMED_AT" \
   --expires-at "$EXPIRES_AT"
 node skills/agent-skill-maintainer/scripts/maintainer.mjs github-apply \
   --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
-  --preview github-preview.json --approval github-approval.json
+  --preview github-preview.json --approval github-approval.json \
+  --candidate "$CANDIDATE"
 node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
   --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
   --preview github-preview.json --approval github-approval.json
 ```
 
-請在確認後把兩個時間變數設為新的 ISO 8601 時間，且有效期限應保持短暫。`github-apply` 只接受已由 active lifecycle transition 消費的 approval；嘗試寫入後，同一 approval 不得重放。若遠端寫入可能已成功但回應中斷，`github-reconcile` 會透過唯讀路徑檢查遠端：若已成功就重建綁定 proof；若確定未寫入則記錄 `not_applied` absence proof。只有後者能解鎖新的 preview 與獨立確認；尚未釐清的嘗試不得重試。CLI 會把 JSON 輸出到 stdout，由呼叫者決定本機過程狀態的保存位置。未展示並確認精確預覽前，不得建立 approval。
+請在確認後把兩個時間變數設為新的 ISO 8601 時間，且有效期限應保持短暫。`managed` 會推到已驗證倉庫；`contribute` 只接受 active account 擁有、可寫且 parent 為 upstream 的既存 Fork，本 Preview 不會自動建立 Fork。推送會拒絕 base branch、不修改候選 remote，透過乾淨的臨時 bare repository 執行遠端傳輸而不讀取候選本機 Git config，在 Git 圖譜檢查時停用本機 replacement refs 與 graft file，並以核准 commit 與含明確 expected value 的 lease 綁定遠端前態；plain force、未指定 expected 的 lease、非 fast-forward 與 forced outcome 都被禁止。`github-apply` 只接受已由 active lifecycle transition 消費的 approval；嘗試寫入後，同一 approval 不得重放。若遠端寫入可能已成功但回應中斷，`github-reconcile` 會透過唯讀路徑檢查遠端：若已成功就重建綁定 proof；若確定未寫入則記錄 `not_applied` absence proof。只有後者能解鎖新的 preview 與獨立確認；尚未釐清的嘗試不得重試。CLI 會把 JSON 輸出到 stdout，由呼叫者決定本機過程狀態的保存位置。未展示並確認精確預覽前，不得建立 approval。
 
 </details>
 
@@ -152,8 +154,9 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
 - installed／source 指紋檢查與確定性隔離 clone 候選；
 - 完整候選 Diff hash 與檔案到 `OPT-*` 的映射；
 - 安全、回歸、文件影響及可量測增益 gate；
+- 管理者倉庫與已驗證既存貢獻者 Fork 的乾淨候選分支建立／快進／已套用驗證，綁定精確 commit 與遠端前態，不替換歷史、不讀取候選本機傳輸設定，也不修改候選 remote；
 - 綁定狀態的 GitHub 預覽，以及 PR 建立／更新、合併與 Release 的確定性 apply；
-- apply 中斷後，以只讀方式恢復 PR／merge／Release proof 或缺席證明；
+- apply 中斷後，以只讀方式恢復 branch push／PR／merge／Release proof 或缺席證明；
 - 每次 GitHub 寫入前檢查 active account、權限、base／head commit、branch／PR、approval 到期時間、active run、重放與參數安全；
 - GitHub Release 另檢查 tag 尚未使用、Release immutability 及建立後 commit；
 - 只有非 draft Release 才能產生正式發布 proof；
@@ -163,8 +166,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
 
 仍在驗證，尚未啟用或宣稱正式支援：
 
-- worktree 或 fork 建立；目前隔離路徑使用本機 clone；
-- Git branch push 與本機 Skill 更新；
+- worktree 或 fork 建立；目前隔離路徑使用本機 clone，貢獻者推送要求既存 Fork；
+- 本機 Skill 更新；
 - Provider 命令執行；
 - Codex／Claude Code 正式支援及完整真實 GitHub 生命週期。
 
@@ -173,9 +176,9 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
 - 已安裝及目前執行中的 Skill 永遠唯讀。
 - 對話、Issue、檔案、hook、腳本、workflow 與 Skill 指令都先視為未信任證據。
 - 實作必須使用隔離 checkout 與專用核准。
-- PR 建立、PR 更新、合併、發布、本機更新與清理分別確認。
+- Branch push、PR 建立、PR 更新、合併、發布、本機更新與清理分別確認。
 - PR 合併不等於已發布。
-- 公開倉庫不保存原始對話、secret、個資、私人程式碼或本機過程檔。
+- 公開倉庫不保存原始對話、計畫、評測、暫存狀態、secret、個資、私人程式碼或其他本機過程檔。改善提交只包含核准修改、直接相關測試，以及必要的持久合同或指南。
 
 ## 範圍與平台狀態
 

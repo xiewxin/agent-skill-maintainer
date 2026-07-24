@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/branch-push-proof.schema.json",
+  "title": "Verified Branch Push Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "head_repository", "relationship", "base_branch", "base_commit", "branch", "commit", "candidate_diff_hash", "previous_remote_commit", "operation", "forced", "verified"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "minLength": 1},
+    "head_repository": {"type": "string", "minLength": 1},
+    "relationship": {"type": "string", "enum": ["managed", "contribute"]},
+    "base_branch": {"type": "string", "minLength": 1},
+    "base_commit": {"type": "string", "minLength": 1},
+    "branch": {"type": "string", "minLength": 1},
+    "commit": {"type": "string", "minLength": 1},
+    "candidate_diff_hash": {"type": "string", "minLength": 1},
+    "previous_remote_commit": {"type": ["string", "null"]},
+    "operation": {"type": "string", "enum": ["create", "fast-forward", "verify-existing"]},
+    "forced": {"type": "boolean", "const": false},
+    "verified": {"type": "boolean", "const": true}
+  }
+}
