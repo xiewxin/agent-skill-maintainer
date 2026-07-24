@@ -209,6 +209,12 @@ export function createBranchPushFixture({
     "user.email",
     "test@example.invalid",
   );
+  runGit(
+    isolated.candidate_path,
+    "config",
+    "core.autocrlf",
+    "false",
+  );
   writeFileSync(
     join(isolated.candidate_path, "SKILL.md"),
     "source\nbranch push\n",
