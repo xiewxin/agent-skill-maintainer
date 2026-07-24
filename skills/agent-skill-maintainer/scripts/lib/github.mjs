@@ -3,6 +3,9 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   ApprovalDriftError,
   canonicalJson,
@@ -12,9 +15,17 @@ import {
   redactText,
   validateDocument,
 } from "./core.mjs";
-import { verifyReleaseNoteCoverageProof } from "./git.mjs";
+import {
+  createIsolatedGitTransport,
+  isCommitAncestor,
+  pushGithubBranch,
+  readGithubRemoteBranch,
+  validateBranchPushCandidate,
+  verifyReleaseNoteCoverageProof,
+} from "./git.mjs";
 
 const ACTIONS = new Set([
+  "branch_push",
   "pr_create",
   "pr_update",
   "merge",
@@ -43,15 +54,18 @@ const REPOSITORY_PATTERN =
 const MANAGED_PERMISSIONS = new Set(["WRITE", "MAINTAIN", "ADMIN"]);
 const MAX_APPROVAL_TTL_MS = 30 * 60 * 1000;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
+const FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/u;
+const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/u;
 
 /** Runs GitHub CLI without shell expansion or an interactive prompt. */
-function defaultRunner(arguments_) {
+function defaultRunner(arguments_, { environment = {} } = {}) {
   return spawnSync("gh", arguments_, {
     encoding: "utf8",
     env: {
       ...process.env,
       GH_PROMPT_DISABLED: "1",
       GIT_TERMINAL_PROMPT: "0",
+      ...environment,
     },
     shell: false,
     windowsHide: true,
@@ -59,8 +73,8 @@ function defaultRunner(arguments_) {
 }
 
 /** Returns trimmed stdout or raises a bounded GitHub CLI error. */
-function runGithub(runner, arguments_) {
-  const result = runner(arguments_);
+function runGithub(runner, arguments_, options = {}) {
+  const result = runner(arguments_, options);
   if (
     !isObject(result) ||
     !Number.isInteger(result.status) ||
@@ -76,6 +90,152 @@ function runGithub(runner, arguments_) {
     throw new Error(`GitHub CLI 執行失敗：${summary}`);
   }
   return result.stdout.trim();
+}
+
+/** Returns the validated branch-push target from one preview. */
+function branchPushTarget(preview) {
+  const target = preview.state.action_target;
+  const headRepository = headRepositoryForPreview(preview);
+  if (preview.state.head_branch === preview.state.base_branch) {
+    throw new Error("branch push head branch 不得等於 base branch");
+  }
+  if (
+    typeof target.candidate_path_fingerprint !== "string" ||
+    !FINGERPRINT_PATTERN.test(target.candidate_path_fingerprint)
+  ) {
+    throw new Error("branch push candidate path fingerprint 不合法");
+  }
+  if (
+    target.expected_remote_commit !== null &&
+    (typeof target.expected_remote_commit !== "string" ||
+      !COMMIT_PATTERN.test(target.expected_remote_commit))
+  ) {
+    throw new Error("branch push expected remote commit 不合法");
+  }
+  const expectedOperation =
+    target.expected_remote_commit === null
+      ? "create"
+      : target.expected_remote_commit === preview.state.head_commit
+        ? "verify-existing"
+        : "fast-forward";
+  if (target.operation !== expectedOperation) {
+    throw new Error("branch push operation 與遠端前態不一致");
+  }
+  const expectedFields = [
+    "candidate_path_fingerprint",
+    "expected_remote_commit",
+    "head_repository",
+    "operation",
+  ];
+  const unknown = Object.keys(target)
+    .filter((name) => !expectedFields.includes(name))
+    .sort();
+  if (unknown.length > 0) {
+    throw new Error(`branch push target 含未知欄位：${unknown.join(", ")}`);
+  }
+  return {
+    candidatePathFingerprint: target.candidate_path_fingerprint,
+    expectedRemoteCommit: target.expected_remote_commit,
+    headRepository,
+    operation: target.operation,
+  };
+}
+
+/** Returns the immutable GitHub HTTPS URL for one verified repository. */
+function githubRemoteUrl(repository) {
+  if (!REPOSITORY_PATTERN.test(repository)) {
+    throw new Error("GitHub repository 格式不合法");
+  }
+  return `https://github.com/${repository}.git`;
+}
+
+/** Runs one operation with a temporary Git config owned by GitHub CLI. */
+function withTemporaryGithubGitConfig(
+  runner,
+  operation,
+  {
+    temporaryRoot = tmpdir(),
+    sourceRepository = null,
+  } = {},
+) {
+  const root = mkdtempSync(
+    join(temporaryRoot, "agent-skill-maintainer-git-"),
+  );
+  const gitConfigGlobal = join(root, "gitconfig");
+  try {
+    runGithub(
+      runner,
+      ["auth", "setup-git", "--hostname", "github.com"],
+      {
+        environment: {
+          GIT_CONFIG_GLOBAL: gitConfigGlobal,
+          GIT_CONFIG_NOSYSTEM: "1",
+        },
+      },
+    );
+    const temporaryRepository = createIsolatedGitTransport(root, {
+      sourceRepository,
+      gitConfigGlobal,
+    });
+    return operation({ gitConfigGlobal, temporaryRepository });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/** Builds a schema-valid proof after an exact remote ref observation. */
+function buildBranchPushProof(preview) {
+  const target = branchPushTarget(preview);
+  const proof = {
+    schema_version: 1,
+    repository: preview.state.repository,
+    head_repository: target.headRepository,
+    relationship: preview.state.relationship,
+    base_branch: preview.state.base_branch,
+    base_commit: preview.state.base_commit,
+    branch: preview.state.head_branch,
+    commit: preview.state.head_commit,
+    candidate_diff_hash: preview.state.diff_hash,
+    previous_remote_commit: target.expectedRemoteCommit,
+    operation: target.operation,
+    forced: false,
+    verified: true,
+  };
+  validateDocument("branch-push-proof", proof);
+  return proof;
+}
+
+/** Revalidates one candidate without performing remote access. */
+export function validateBranchPushLocalState(
+  preview,
+  candidatePath,
+  candidateSnapshot,
+) {
+  if (preview.action !== "branch_push") {
+    throw new Error("只有 branch_push 需要 candidate preflight");
+  }
+  const target = branchPushTarget(preview);
+  if (
+    preview.state.base_branch !==
+      candidateSnapshot?.repository_snapshot?.base_ref ||
+    preview.state.base_commit !==
+      candidateSnapshot?.repository_snapshot?.merge_base ||
+    preview.state.head_commit !==
+      candidateSnapshot?.repository_snapshot?.head_commit ||
+    preview.state.diff_hash !== candidateSnapshot?.candidate_diff_hash
+  ) {
+    throw new ApprovalDriftError(
+      "branch push preview 與 candidate snapshot 不一致",
+    );
+  }
+  return validateBranchPushCandidate(
+    candidatePath,
+    candidateSnapshot,
+    {
+      candidatePathFingerprint: target.candidatePathFingerprint,
+      branch: preview.state.head_branch,
+    },
+  );
 }
 
 /** Parses one JSON object emitted by GitHub CLI. */
@@ -662,7 +822,10 @@ function verifyMergedPullRequest(preview, runner) {
 /** Re-reads the active account, repository permission, and mutation target. */
 export function inspectGithubActionState(
   preview,
-  { runner = defaultRunner } = {},
+  {
+    runner = defaultRunner,
+    allowBaseCommitDrift = false,
+  } = {},
 ) {
   const current = buildGithubActionPreview(preview.action, preview.state);
   if (canonicalJson(current) !== canonicalJson(preview)) {
@@ -697,16 +860,54 @@ export function inspectGithubActionState(
   ) {
     throw new ApprovalDriftError("GitHub repository 寫入權限已漂移");
   }
-  const baseCommit = runGithub(runner, [
-    "api",
-    `repos/${preview.state.repository}/branches/${encodeURIComponent(
-      preview.state.base_branch,
-    )}`,
-    "--jq",
-    ".commit.sha",
-  ]);
-  if (baseCommit !== preview.state.base_commit) {
-    throw new ApprovalDriftError("GitHub base branch commit 已漂移");
+  if (
+    preview.action === "branch_push" &&
+    preview.state.relationship === "contribute"
+  ) {
+    const headRepository = headRepositoryForPreview(preview);
+    let fork;
+    try {
+      fork = parseGithubJson(
+        runGithub(runner, [
+          "repo",
+          "view",
+          headRepository,
+          "--json",
+          "nameWithOwner,viewerPermission,parent",
+        ]),
+        "GitHub fork repository",
+      );
+    } catch (error) {
+      throw new ApprovalDriftError(
+        "contribute Fork 不存在或無法驗證；目前不支援自動建立 Fork",
+        { cause: error },
+      );
+    }
+    if (
+      fork.nameWithOwner?.toLowerCase() !==
+        headRepository.toLowerCase() ||
+      !MANAGED_PERMISSIONS.has(fork.viewerPermission) ||
+      fork.parent?.nameWithOwner?.toLowerCase() !==
+        preview.state.repository.toLowerCase()
+    ) {
+      throw new ApprovalDriftError(
+        "contribute Fork owner、parent 或寫入權限已漂移",
+      );
+    }
+  }
+  let baseCommit;
+  if (allowBaseCommitDrift !== true) {
+    baseCommit = runGithub(runner, [
+      "api",
+      `repos/${preview.state.repository}/branches/${encodeURIComponent(
+        preview.state.base_branch,
+      )}`,
+      "--jq",
+      ".commit.sha",
+    ]);
+    if (baseCommit !== preview.state.base_commit) {
+      throw new ApprovalDriftError("GitHub base branch commit 已漂移");
+    }
   }
 
   if (preview.action === "pr_create") {
@@ -869,6 +1070,9 @@ function normalizePreview(action, state) {
   if (["pr_create", "pr_update"].includes(action)) {
     headRepositoryForPreview({ state });
   }
+  if (action === "branch_push") {
+    branchPushTarget({ action, state });
+  }
   if (["merge", "release"].includes(action) && state.relationship !== "managed") {
     throw new Error("只有 managed 倉庫可合併或發布");
   }
@@ -1006,6 +1210,96 @@ export function verifyGithubActionApproval(
   return true;
 }
 
+/** Applies one exact branch push through an isolated Git transport. */
+function applyBranchPush(
+  preview,
+  {
+    runner,
+    gitRunner,
+    candidatePath,
+    candidateSnapshot,
+    temporaryRoot,
+  },
+) {
+  const local = validateBranchPushLocalState(
+    preview,
+    candidatePath,
+    candidateSnapshot,
+  );
+  inspectGithubActionState(preview, { runner });
+  const target = branchPushTarget(preview);
+  const remoteUrl = githubRemoteUrl(target.headRepository);
+  const proof = withTemporaryGithubGitConfig(
+    runner,
+    ({ gitConfigGlobal, temporaryRepository }) => {
+      const before = readGithubRemoteBranch(
+        temporaryRepository,
+        {
+          remoteUrl,
+          branch: preview.state.head_branch,
+          gitConfigGlobal,
+          runner: gitRunner,
+        },
+      );
+      if (before !== target.expectedRemoteCommit) {
+        throw new ApprovalDriftError(
+          "GitHub branch push 遠端前態已漂移",
+        );
+      }
+      if (
+        target.operation === "fast-forward" &&
+        !isCommitAncestor(
+          local.candidate_path,
+          target.expectedRemoteCommit,
+          preview.state.head_commit,
+          { runner: gitRunner },
+        )
+      ) {
+        throw new ApprovalDriftError(
+          "GitHub branch push 不是 fast-forward",
+        );
+      }
+      if (target.operation !== "verify-existing") {
+        pushGithubBranch(
+          temporaryRepository,
+          {
+            remoteUrl,
+            branch: preview.state.head_branch,
+            headCommit: preview.state.head_commit,
+            expectedRemoteCommit: target.expectedRemoteCommit,
+            gitConfigGlobal,
+            runner: gitRunner,
+          },
+        );
+      }
+      const after = readGithubRemoteBranch(
+        temporaryRepository,
+        {
+          remoteUrl,
+          branch: preview.state.head_branch,
+          gitConfigGlobal,
+          runner: gitRunner,
+        },
+      );
+      if (after !== preview.state.head_commit) {
+        throw new Error(
+          "GitHub branch push postcondition 未指向核准提交",
+        );
+      }
+      return buildBranchPushProof(preview);
+    },
+    {
+      temporaryRoot,
+      sourceRepository: local.candidate_path,
+    },
+  );
+  return {
+    action: "branch_push",
+    repository: preview.state.repository,
+    proof,
+  };
+}
+
 /** Applies one confirmed action after re-reading its remote GitHub state. */
 export function applyGithubAction(
   preview,
@@ -1013,10 +1307,23 @@ export function applyGithubAction(
   {
     now = new Date(),
     runner = defaultRunner,
+    gitRunner,
+    candidatePath,
+    candidateSnapshot,
+    temporaryRoot,
     documentationImpact = null,
   } = {},
 ) {
   verifyGithubActionApproval(approval, preview, { now });
+  if (preview.action === "branch_push") {
+    return applyBranchPush(preview, {
+      runner,
+      gitRunner,
+      candidatePath,
+      candidateSnapshot,
+      temporaryRoot,
+    });
+  }
   const arguments_ = buildMutationArguments(preview);
   inspectGithubActionState(preview, { runner });
   const output = runGithub(runner, arguments_);
@@ -1053,10 +1360,52 @@ export function reconcileGithubAction(
     documentationImpact = null,
     approvalFingerprint,
     now = new Date(),
+    gitRunner,
+    temporaryRoot,
   } = {},
 ) {
   let reconciliation;
-  if (preview.action === "pr_create") {
+  if (preview.action === "branch_push") {
+    inspectGithubActionState(preview, {
+      runner,
+      allowBaseCommitDrift: true,
+    });
+    const target = branchPushTarget(preview);
+    const remoteUrl = githubRemoteUrl(target.headRepository);
+    const remoteCommit = withTemporaryGithubGitConfig(
+      runner,
+      ({ gitConfigGlobal, temporaryRepository }) =>
+        readGithubRemoteBranch(
+          temporaryRepository,
+          {
+            remoteUrl,
+            branch: preview.state.head_branch,
+            gitConfigGlobal,
+            runner: gitRunner,
+          },
+        ),
+      { temporaryRoot },
+    );
+    if (remoteCommit === preview.state.head_commit) {
+      reconciliation = {
+        status: "applied",
+        proof: buildBranchPushProof(preview),
+      };
+    } else if (remoteCommit === target.expectedRemoteCommit) {
+      reconciliation = {
+        status: "not_applied",
+        remote_state: {
+          head_repository: target.headRepository,
+          branch: preview.state.head_branch,
+          commit: remoteCommit,
+        },
+      };
+    } else {
+      throw new ApprovalDriftError(
+        "GitHub branch push reconcile 遠端狀態已漂移",
+      );
+    }
+  } else if (preview.action === "pr_create") {
     reconciliation = reconcileCreatedPullRequest(
       preview,
       runner,

@@ -22,6 +22,7 @@ import {
   clone,
   fingerprint,
   isObject,
+  validateBranchPushProofContract,
   validateCandidateSnapshotContract,
   validateDocument,
   validatePrProofContract,
@@ -51,6 +52,7 @@ const TERMINAL_PHASES = new Set(["aborted", "blocked", "completed"]);
 const INTERRUPTION_PHASES = new Set(["aborted", "blocked"]);
 const CONSUMED_ACTION_PHASES = new Set([
   "isolation",
+  "branch_push",
   "pr_creation",
   "pr_update",
   "merge",
@@ -58,11 +60,19 @@ const CONSUMED_ACTION_PHASES = new Set([
   "local_update",
 ]);
 const GITHUB_ACTION_PHASES = Object.freeze({
+  branch_push: "branch_push",
   pr_create: "pr_creation",
   pr_update: "pr_update",
   merge: "merge",
   release: "release",
 });
+const PHASE_GITHUB_ACTIONS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(GITHUB_ACTION_PHASES).map(
+      ([action, phase]) => [phase, action],
+    ),
+  ),
+);
 const NEXT_PHASES = Object.freeze({
   target_selection: new Set(["evidence_collection"]),
   evidence_collection: new Set(["feedback_validation"]),
@@ -71,7 +81,13 @@ const NEXT_PHASES = Object.freeze({
   optimization_approval: new Set(["isolation"]),
   isolation: new Set(["implementation"]),
   implementation: new Set(["validation", "optimization_approval"]),
-  validation: new Set(["pr_creation", "optimization_approval"]),
+  validation: new Set(["branch_push", "optimization_approval"]),
+  branch_push: new Set([
+    "branch_push",
+    "pr_creation",
+    "pr_update",
+    "optimization_approval",
+  ]),
   pr_creation: new Set([
     "pr_creation",
     "pr_update",
@@ -121,14 +137,21 @@ const PHASE_UPDATE_FIELDS = Object.freeze({
   isolation: new Set(["approvals", "repository_snapshot"]),
   implementation: new Set(),
   validation: new Set(["candidate_snapshot"]),
+  branch_push: new Set([
+    "action_preview",
+    "approvals",
+    "validation_summary",
+  ]),
   pr_creation: new Set([
     "action_preview",
     "approvals",
+    "branch_push_proof",
     "validation_summary",
   ]),
   pr_update: new Set([
     "action_preview",
     "approvals",
+    "branch_push_proof",
     "candidate_snapshot",
     "pr_proof",
     "validation_summary",
@@ -229,27 +252,25 @@ function migrateRunDocument(document) {
   if (!Number.isInteger(document.schema_version)) {
     throw new Error("run state schema_version 不合法");
   }
-  if (document.schema_version === 4) {
+  if (document.schema_version === 5) {
     return {
       document: clone(document),
       migrated: false,
     };
   }
-  if (document.schema_version === 3) {
-    const current = clone(document);
+  let current;
+  let migrated = true;
+  if (document.schema_version === 4) {
+    current = clone(document);
+  } else if (document.schema_version === 3) {
+    current = clone(document);
     if (!Array.isArray(current.consumed_approval_fingerprints)) {
       current.consumed_approval_fingerprints = [];
     }
     if (!Array.isArray(current.attempted_github_action_fingerprints)) {
       current.attempted_github_action_fingerprints = [];
     }
-    current.schema_version = 4;
-    const inferredAction = {
-      pr_creation: "pr_create",
-      pr_update: "pr_update",
-      merge: "merge",
-      release: "release",
-    }[current.phase];
+    const inferredAction = PHASE_GITHUB_ACTIONS[current.phase];
     current.github_action_attempts =
       current.attempted_github_action_fingerprints.map(
         (approvalFingerprint, index, attempts) => ({
@@ -261,46 +282,53 @@ function migrateRunDocument(document) {
         }),
       );
     current.github_action_reconciliations = [];
-    return {
-      document: current,
-      migrated: true,
-    };
-  }
-  if (document.schema_version === 2) {
-    return {
-      document: {
-        ...clone(document),
-        schema_version: 4,
-        consumed_approval_fingerprints:
-          document.consumed_approval_fingerprints ?? [],
-        attempted_github_action_fingerprints: [],
-        github_action_attempts: [],
-        github_action_reconciliations: [],
-      },
-      migrated: true,
-    };
-  }
-  if (document.schema_version !== 1) {
-    throw new Error(
-      `不支援的 run state schema_version：${document.schema_version}`,
-    );
-  }
-  const phase = LEGACY_PHASES[document.phase];
-  if (phase === undefined) {
-    throw new Error(`無法遷移舊版 run phase：${document.phase}`);
-  }
-  return {
-    document: {
+  } else if (document.schema_version === 2) {
+    current = {
       ...clone(document),
-      schema_version: 4,
+      consumed_approval_fingerprints:
+        document.consumed_approval_fingerprints ?? [],
+      attempted_github_action_fingerprints: [],
+      github_action_attempts: [],
+      github_action_reconciliations: [],
+    };
+  } else {
+    if (document.schema_version !== 1) {
+      throw new Error(
+        `不支援的 run state schema_version：${document.schema_version}`,
+      );
+    }
+    const phase = LEGACY_PHASES[document.phase];
+    if (phase === undefined) {
+      throw new Error(`無法遷移舊版 run phase：${document.phase}`);
+    }
+    current = {
+      ...clone(document),
       phase,
       consumed_approval_fingerprints:
         document.consumed_approval_fingerprints ?? [],
       attempted_github_action_fingerprints: [],
       github_action_attempts: [],
       github_action_reconciliations: [],
-    },
-    migrated: true,
+    };
+  }
+  if (document.schema_version === 3) {
+    migrated = true;
+  }
+  if (
+    current.status === "active" &&
+    ["pr_creation", "pr_update", "merge", "release", "local_update"].includes(
+      current.phase,
+    )
+  ) {
+    throw new Error(
+      "舊版 active run 已進入遠端副作用階段但缺少 branch push proof；" +
+        "請使用原版本完成 reconcile，或建立新 run",
+    );
+  }
+  current.schema_version = 5;
+  return {
+    document: current,
+    migrated,
   };
 }
 
@@ -315,7 +343,7 @@ export function createRun(
     throw new Error(`run 已存在：${runId}`);
   }
   const document = {
-    schema_version: 4,
+    schema_version: 5,
     run_id: runId,
     binding_id: safeBindingId,
     phase: "target_selection",
@@ -802,6 +830,20 @@ function requirePhaseEvidence(document, nextPhase) {
   if (nextPhase === "validation") {
     validateRunCandidate(document);
   }
+  if (nextPhase === "branch_push") {
+    const candidate = validateRunCandidate(document);
+    validatePrReadyValidation(document.validation_summary, candidate);
+    requireActionApproval(
+      document,
+      "branch_push",
+      {
+        expectedHeadCommit:
+          candidate.repository_snapshot.head_commit,
+        expectedDiffHash: candidate.candidate_diff_hash,
+        expectedBaseBranch: candidate.repository_snapshot.base_ref,
+      },
+    );
+  }
   if (["pr_creation", "pr_update"].includes(nextPhase)) {
     const candidate = validateRunCandidate(document);
     const validation = validatePrReadyValidation(
@@ -831,6 +873,21 @@ function requirePhaseEvidence(document, nextPhase) {
         expectedDiffHash: document.candidate_snapshot.candidate_diff_hash,
         expectedBaseBranch:
           document.candidate_snapshot.repository_snapshot.base_ref,
+      },
+    );
+    const actionTarget = currentActionTarget(document, action);
+    const headRepository =
+      actionTarget.head_repository ?? document.target.repository;
+    validateBranchPushProofContract(
+      document.branch_push_proof,
+      candidate,
+      {
+        repository: document.target.repository,
+        relationship: document.action_preview.state.relationship,
+        baseBranch: candidate.repository_snapshot.base_ref,
+        baseCommit: candidate.repository_snapshot.merge_base,
+        headBranch: document.action_preview.state.head_branch,
+        headRepository,
       },
     );
     if (
@@ -995,12 +1052,7 @@ export function transitionRun(
       );
     }
     try {
-      const retryAction = {
-        pr_creation: "pr_create",
-        pr_update: "pr_update",
-        merge: "merge",
-        release: "release",
-      }[nextPhase];
+      const retryAction = PHASE_GITHUB_ACTIONS[nextPhase];
       if (nextPhase === document.phase && retryAction !== undefined) {
         if (
           document.github_action_attempts.some(
@@ -1041,13 +1093,9 @@ export function transitionRun(
       if (CONSUMED_ACTION_PHASES.has(nextPhase)) {
         const action = nextPhase === "isolation"
           ? "implementation"
-          : {
-              pr_creation: "pr_create",
-              pr_update: "pr_update",
-              merge: "merge",
-              release: "release",
-              local_update: "local_update",
-            }[nextPhase];
+          : nextPhase === "local_update"
+            ? "local_update"
+            : PHASE_GITHUB_ACTIONS[nextPhase];
         const consumed = document.approvals.find(
           (item) => isObject(item) && item.action === action,
         );

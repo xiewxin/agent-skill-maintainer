@@ -33,6 +33,7 @@ import {
   isObject,
   resolveCandidatePath,
   resolveLoosePath,
+  validateCandidateSnapshotContract,
   validateCandidateProcessArtifacts,
   validateDocument,
   verifyApproval,
@@ -41,6 +42,9 @@ import {
 const REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
 const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
+const GITHUB_HTTPS_REMOTE =
+  /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/u;
 const IGNORED_FINGERPRINT_PARTS = new Set([
   ".git",
   "node_modules",
@@ -77,12 +81,37 @@ export function validateRef(ref, label = "ref") {
   return ref;
 }
 
-/** Builds a Git environment with hooks, prompts, and external diff disabled. */
-function safeGitEnvironment({ readOnly = false } = {}) {
+/** Builds a Git environment with graph overrides, prompts, and diff disabled. */
+function safeGitEnvironment({
+  readOnly = false,
+  gitConfigGlobal = GIT_NULL_PATH,
+} = {}) {
   const environment = { ...process.env };
+  for (const name of Object.keys(environment)) {
+    if (
+      name === "GIT_CONFIG" ||
+      name === "GIT_CONFIG_COUNT" ||
+      name === "GIT_CONFIG_PARAMETERS" ||
+      name.startsWith("GIT_CONFIG_KEY_") ||
+      name.startsWith("GIT_CONFIG_VALUE_")
+    ) {
+      delete environment[name];
+    }
+  }
   delete environment.GIT_EXTERNAL_DIFF;
+  delete environment.GIT_DIR;
+  delete environment.GIT_WORK_TREE;
+  delete environment.GIT_COMMON_DIR;
+  delete environment.GIT_OBJECT_DIRECTORY;
+  delete environment.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+  delete environment.GIT_INDEX_FILE;
+  delete environment.GIT_EXEC_PATH;
+  delete environment.GIT_TEMPLATE_DIR;
   environment.GIT_CONFIG_NOSYSTEM = "1";
-  environment.GIT_CONFIG_GLOBAL = GIT_NULL_PATH;
+  environment.GIT_CONFIG_SYSTEM = GIT_NULL_PATH;
+  environment.GIT_CONFIG_GLOBAL = gitConfigGlobal;
+  environment.GIT_GRAFT_FILE = GIT_NULL_PATH;
+  environment.GIT_NO_REPLACE_OBJECTS = "1";
   environment.GIT_TERMINAL_PROMPT = "0";
   environment.GIT_PAGER = "cat";
   environment.LC_ALL = "C";
@@ -96,14 +125,24 @@ function safeGitEnvironment({ readOnly = false } = {}) {
 export function runGit(
   repository,
   arguments_,
-  { binary = false, readOnly = false, label = "Git command" } = {},
+  {
+    binary = false,
+    readOnly = false,
+    label = "Git command",
+    gitConfigGlobal = GIT_NULL_PATH,
+  } = {},
 ) {
   const result = spawnSync(
     "git",
-    ["-c", `core.hooksPath=${GIT_NULL_PATH}`, ...arguments_],
+    [
+      "--no-replace-objects",
+      "-c",
+      `core.hooksPath=${GIT_NULL_PATH}`,
+      ...arguments_,
+    ],
     {
       cwd: repository,
-      env: safeGitEnvironment({ readOnly }),
+      env: safeGitEnvironment({ readOnly, gitConfigGlobal }),
       encoding: null,
       maxBuffer: 64 * 1024 * 1024,
       shell: false,
@@ -128,6 +167,63 @@ export function runGit(
   } catch (error) {
     throw new Error(`${label} 輸出不是 UTF-8`, { cause: error });
   }
+}
+
+/** Creates a clean bare transport that can read approved candidate objects. */
+export function createIsolatedGitTransport(
+  temporaryRoot,
+  {
+    sourceRepository = null,
+    gitConfigGlobal = GIT_NULL_PATH,
+  } = {},
+) {
+  const root = realpathSync(resolve(temporaryRoot));
+  if (!statSync(root).isDirectory()) {
+    throw new Error("Git transport root 必須是目錄");
+  }
+  const transport = join(root, "transport.git");
+  if (existsSync(transport)) {
+    throw new Error("Git transport 已存在");
+  }
+  runGit(
+    root,
+    ["init", "--bare", "--", transport],
+    {
+      label: "Git transport initialization",
+      gitConfigGlobal,
+    },
+  );
+  if (sourceRepository === null) {
+    return transport;
+  }
+  const source = realpathSync(resolve(sourceRepository));
+  const sourceGitDirectory = join(source, ".git");
+  if (
+    !lstatSync(sourceGitDirectory).isDirectory() ||
+    !statSync(sourceGitDirectory).isDirectory()
+  ) {
+    throw new Error("Git transport source 必須是隔離 clone");
+  }
+  const sourceObjects = realpathSync(
+    join(sourceGitDirectory, "objects"),
+  );
+  const alternatesDirectory = join(transport, "objects", "info");
+  mkdirSync(alternatesDirectory, { recursive: true });
+  writeFileSync(
+    join(alternatesDirectory, "alternates"),
+    `${JSON.stringify(sourceObjects)}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  return transport;
+}
+
+/** Returns a non-disclosing fingerprint for one canonical candidate path. */
+export function fingerprintCandidatePath(candidatePath) {
+  const candidate = realpathSync(resolve(candidatePath));
+  if (!statSync(candidate).isDirectory()) {
+    throw new Error("candidate 必須是目錄");
+  }
+  return fingerprint({ canonical_candidate_path: candidate });
 }
 
 /** Builds a read-only snapshot against the selected ref's merge base. */
@@ -546,29 +642,8 @@ function validateFileMapping(changedFiles, approvedOptIds, fileOptMap) {
 
 export { validateCandidateProcessArtifacts } from "./core.mjs";
 
-/** Builds a candidate snapshot across committed, staged, unstaged, and untracked changes. */
-export function buildCandidateSnapshot({
-  candidatePath,
-  installedPath,
-  sourcePath,
-  baseRef,
-  approvedOptIds,
-  fileOptMap,
-  processArtifactPrefixes = [],
-}) {
-  const paths = validateIsolatedPaths({
-    installedPath,
-    sourcePath,
-    candidatePath,
-  });
-  const candidate = paths.candidate;
-  if (!existsSync(candidate) || !statSync(candidate).isDirectory()) {
-    throw new Error("candidate 必須是已存在的隔離 Git 目錄");
-  }
-  const repositorySnapshot = buildRepositorySnapshot(candidate, {
-    baseRef,
-    processArtifactPrefixes,
-  });
+/** Reads the exact committed, staged, unstaged, and untracked candidate state. */
+function readCandidateDiffState(candidate, repositorySnapshot) {
   const range = `${repositorySnapshot.merge_base}..${repositorySnapshot.head_commit}`;
   const digest = createHash("sha256");
   const diffCommands = [
@@ -662,6 +737,41 @@ export function buildCandidateSnapshot({
     changedFiles.add(path);
   }
   const sortedFiles = [...changedFiles].sort();
+  return {
+    candidateDiffHash: digest.digest("hex"),
+    changedFiles: sortedFiles,
+    untrackedFiles: untracked,
+  };
+}
+
+/** Builds a candidate snapshot across committed, staged, unstaged, and untracked changes. */
+export function buildCandidateSnapshot({
+  candidatePath,
+  installedPath,
+  sourcePath,
+  baseRef,
+  approvedOptIds,
+  fileOptMap,
+  processArtifactPrefixes = [],
+}) {
+  const paths = validateIsolatedPaths({
+    installedPath,
+    sourcePath,
+    candidatePath,
+  });
+  const candidate = paths.candidate;
+  if (!existsSync(candidate) || !statSync(candidate).isDirectory()) {
+    throw new Error("candidate 必須是已存在的隔離 Git 目錄");
+  }
+  const repositorySnapshot = buildRepositorySnapshot(candidate, {
+    baseRef,
+    processArtifactPrefixes,
+  });
+  const candidateState = readCandidateDiffState(
+    candidate,
+    repositorySnapshot,
+  );
+  const sortedFiles = candidateState.changedFiles;
   validateCandidateProcessArtifacts(sortedFiles, {
     excludedPrefixes: processArtifactPrefixes,
   });
@@ -669,7 +779,7 @@ export function buildCandidateSnapshot({
   const snapshot = {
     schema_version: 1,
     repository_snapshot: repositorySnapshot,
-    candidate_diff_hash: digest.digest("hex"),
+    candidate_diff_hash: candidateState.candidateDiffHash,
     changed_files: sortedFiles,
     approved_opt_ids: approved,
     process_artifact_prefixes: clone(processArtifactPrefixes),
@@ -683,6 +793,215 @@ export function buildCandidateSnapshot({
   };
   validateDocument("candidate-snapshot", snapshot);
   return snapshot;
+}
+
+/** Revalidates a clean candidate before reserving a remote push attempt. */
+export function validateBranchPushCandidate(
+  candidatePath,
+  candidateSnapshot,
+  {
+    candidatePathFingerprint,
+    branch,
+  },
+) {
+  const candidateContract =
+    validateCandidateSnapshotContract(candidateSnapshot);
+  const candidate = realpathSync(resolve(candidatePath));
+  if (fingerprintCandidatePath(candidate) !== candidatePathFingerprint) {
+    throw new Error("candidate canonical path fingerprint 已漂移");
+  }
+  const repositoryRoot = realpathSync(
+    runGit(candidate, ["rev-parse", "--show-toplevel"], {
+      readOnly: true,
+      label: "Git candidate preflight",
+    }).trim(),
+  );
+  if (repositoryRoot !== candidate) {
+    throw new Error("candidate 必須指向 Git 根目錄");
+  }
+  const safeBranch = validateBranchName(branch);
+  const currentBranch = runGit(
+    candidate,
+    ["branch", "--show-current"],
+    { readOnly: true, label: "Git candidate preflight" },
+  ).trim();
+  if (currentBranch !== safeBranch) {
+    throw new Error("candidate branch 已漂移");
+  }
+  const headCommit = runGit(candidate, ["rev-parse", "HEAD"], {
+    readOnly: true,
+    label: "Git candidate preflight",
+  }).trim();
+  if (
+    headCommit !== candidateContract.repository_snapshot.head_commit
+  ) {
+    throw new Error("candidate HEAD 已漂移");
+  }
+  const status = runGit(candidate, ["status", "--porcelain", "-z"], {
+    binary: true,
+    readOnly: true,
+    label: "Git candidate preflight",
+  });
+  if (status.length > 0) {
+    throw new Error("candidate 必須先提交所有核准變更");
+  }
+  const repositorySnapshot = buildRepositorySnapshot(candidate, {
+    baseRef: candidateContract.repository_snapshot.base_ref,
+    processArtifactPrefixes:
+      candidateContract.repository_snapshot.process_artifact_prefixes,
+  });
+  if (
+    canonicalJson(repositorySnapshot) !==
+    canonicalJson(candidateContract.repository_snapshot)
+  ) {
+    throw new Error("candidate repository snapshot 已漂移");
+  }
+  const candidateState = readCandidateDiffState(
+    candidate,
+    repositorySnapshot,
+  );
+  if (
+    candidateState.candidateDiffHash !==
+      candidateContract.candidate_diff_hash ||
+    canonicalJson(candidateState.changedFiles) !==
+      canonicalJson(candidateContract.changed_files)
+  ) {
+    throw new Error("candidate Diff 已漂移");
+  }
+  return {
+    candidate_path: candidate,
+    candidate_path_fingerprint: candidatePathFingerprint,
+    branch: safeBranch,
+    head_commit: headCommit,
+    candidate_diff_hash: candidateState.candidateDiffHash,
+  };
+}
+
+/** Validates one immutable GitHub HTTPS remote and branch target. */
+function validateGithubRemoteTarget(remoteUrl, branch) {
+  if (
+    typeof remoteUrl !== "string" ||
+    !GITHUB_HTTPS_REMOTE.test(remoteUrl)
+  ) {
+    throw new Error("GitHub HTTPS remote 格式不合法");
+  }
+  return validateBranchName(branch);
+}
+
+/** Reads one exact GitHub branch ref without using repository remote config. */
+export function readGithubRemoteBranch(
+  repository,
+  {
+    remoteUrl,
+    branch,
+    gitConfigGlobal,
+    runner = runGit,
+  },
+) {
+  const safeBranch = validateGithubRemoteTarget(remoteUrl, branch);
+  const output = runner(
+    repository,
+    [
+      "ls-remote",
+      "--heads",
+      "--",
+      remoteUrl,
+      `refs/heads/${safeBranch}`,
+    ],
+    {
+      readOnly: true,
+      label: "Git remote branch read",
+      gitConfigGlobal,
+    },
+  ).trim();
+  if (output.length === 0) {
+    return null;
+  }
+  const lines = output.split(/\r?\n/u);
+  if (lines.length !== 1) {
+    throw new Error("Git remote branch 回傳多個 ref");
+  }
+  const [commit, ref, ...extra] = lines[0].split(/\s+/u);
+  if (
+    extra.length > 0 ||
+    !COMMIT_PATTERN.test(commit) ||
+    ref !== `refs/heads/${safeBranch}`
+  ) {
+    throw new Error("Git remote branch 回傳格式不合法");
+  }
+  return commit;
+}
+
+/** Returns whether one local commit is an ancestor of another. */
+export function isCommitAncestor(
+  repository,
+  ancestor,
+  descendant,
+  { runner = runGit } = {},
+) {
+  if (!COMMIT_PATTERN.test(ancestor) || !COMMIT_PATTERN.test(descendant)) {
+    throw new Error("Git commit 格式不合法");
+  }
+  const mergeBase = runner(
+    repository,
+    ["merge-base", ancestor, descendant],
+    { readOnly: true, label: "Git fast-forward check" },
+  ).trim();
+  return mergeBase === ancestor;
+}
+
+/** Pushes one exact commit from an isolated transport repository. */
+export function pushGithubBranch(
+  repository,
+  {
+    remoteUrl,
+    branch,
+    headCommit,
+    expectedRemoteCommit,
+    gitConfigGlobal,
+    runner = runGit,
+  },
+) {
+  const safeBranch = validateGithubRemoteTarget(remoteUrl, branch);
+  if (!COMMIT_PATTERN.test(headCommit)) {
+    throw new Error("Git head commit 格式不合法");
+  }
+  if (
+    expectedRemoteCommit !== null &&
+    (typeof expectedRemoteCommit !== "string" ||
+      !COMMIT_PATTERN.test(expectedRemoteCommit))
+  ) {
+    throw new Error("Git expected remote commit 格式不合法");
+  }
+  runner(
+    repository,
+    ["cat-file", "-e", `${headCommit}^{commit}`],
+    {
+      readOnly: true,
+      label: "Git push object preflight",
+      gitConfigGlobal,
+    },
+  );
+  const destination = `refs/heads/${safeBranch}`;
+  const output = runner(
+    repository,
+    [
+      "push",
+      "--porcelain",
+      `--force-with-lease=${destination}:${expectedRemoteCommit ?? ""}`,
+      "--",
+      remoteUrl,
+      `${headCommit}:${destination}`,
+    ],
+    {
+      label: "Git branch push",
+      gitConfigGlobal,
+    },
+  );
+  if (/^\+\t.*forced update/imu.test(output)) {
+    throw new Error("Git branch push 出現未允許的 forced update");
+  }
+  return output;
 }
 
 /** Extracts PR identifiers from common merge and squash subjects. */

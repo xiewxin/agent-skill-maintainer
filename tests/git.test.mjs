@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   ApprovalDriftError,
   buildApproval,
@@ -21,7 +23,12 @@ import {
   buildRepositorySnapshot,
   createIsolatedCandidate,
   evaluateReleaseNoteCoverage,
+  fingerprintCandidatePath,
   fingerprintTree,
+  isCommitAncestor,
+  pushGithubBranch,
+  readGithubRemoteBranch,
+  validateBranchPushCandidate,
   validateCandidateProcessArtifacts,
   validateIsolatedPaths,
   verifyReleaseNoteCoverageProof,
@@ -35,9 +42,14 @@ import {
   verifyGithubActionPreview,
 } from "../skills/agent-skill-maintainer/scripts/lib/github.mjs";
 import {
+  branchPushGithubRunner,
+  createBranchPushFixture,
+  createIsolationFixture,
   initializeRepository,
+  localRemoteGitRunner,
   optimizationFixture,
   runGit,
+  sourceApproval,
 } from "./fixtures.mjs";
 
 const DOCUMENTATION_IMPACT = {
@@ -49,47 +61,45 @@ const DOCUMENTATION_IMPACT = {
   reason: "README reflects the approved candidate behavior.",
 };
 
-/** Creates installed, source, and candidate roots for one isolated test. */
-function createIsolationFixture() {
-  const root = mkdtempSync(join(tmpdir(), "maintainer-git-"));
-  const installed = join(root, "installed", "example-skill");
-  const source = join(root, "source");
-  const candidates = join(root, "candidates");
-  mkdirSync(installed, { recursive: true });
-  mkdirSync(candidates);
-  writeFileSync(join(installed, "SKILL.md"), "installed\n", "utf8");
-  initializeRepository(source);
-  writeFileSync(join(source, "SKILL.md"), "source\n", "utf8");
-  runGit(source, "add", "SKILL.md");
-  runGit(source, "commit", "-m", "source");
-  return { root, installed, source, candidates };
-}
-
-/** Builds a verified binding and approval for the current source head. */
-function sourceApproval(source, installedFingerprint, relationship = "managed") {
-  const snapshot = buildRepositorySnapshot(source, { baseRef: "main" });
-  const optimization = optimizationFixture();
-  const binding = {
-    schema_version: 1,
+/** Builds one branch-push preview state from a committed candidate fixture. */
+function branchPushState(
+  fixture,
+  {
+    relationship = "managed",
+    account = relationship === "managed" ? "example-user" : "contributor",
+    headRepository =
+      relationship === "managed" ? "example/skill" : "contributor/skill",
+    expectedRemoteCommit = null,
+    operation =
+      expectedRemoteCommit === null
+        ? "create"
+        : expectedRemoteCommit ===
+            fixture.candidateSnapshot.repository_snapshot.head_commit
+          ? "verify-existing"
+          : "fast-forward",
+  } = {},
+) {
+  const repository = fixture.candidateSnapshot.repository_snapshot;
+  return {
+    run_id: "run-001",
     binding_id: "binding-001",
-    skill: "example-skill",
-    source_repository: "example/skill",
-    installed_fingerprint: installedFingerprint,
-    install_method: "manual",
-    remote_verified: true,
-    relationship,
-    release_enabled: false,
-  };
-  const approval = buildApproval([optimization], {
-    runId: "run-001",
-    bindingId: binding.binding_id,
-    relationship,
+    account,
     repository: "example/skill",
-    headCommit: snapshot.head_commit,
-    diffHash: snapshot.diff_hash,
-    processArtifactPrefixes: snapshot.process_artifact_prefixes,
-  });
-  return { snapshot, optimization, binding, relationship, approval };
+    relationship,
+    base_branch: repository.base_ref,
+    base_commit: repository.merge_base,
+    head_branch: fixture.branch,
+    head_commit: repository.head_commit,
+    diff_hash: fixture.candidateSnapshot.candidate_diff_hash,
+    action_target: {
+      candidate_path_fingerprint: fingerprintCandidatePath(fixture.candidate),
+      expected_remote_commit: expectedRemoteCommit,
+      head_repository: headRepository,
+      operation,
+    },
+    release_enabled: false,
+    provider_contract_hash: "provider123",
+  };
 }
 
 test("repository snapshot uses merge base and hashes committed diff", () => {
@@ -501,6 +511,1034 @@ test("candidate process artifacts are blocked from tracked or untracked Diff", (
       ]),
     /過程檔/u,
   );
+});
+
+test("branch push candidate preflight requires the exact clean committed candidate", () => {
+  const fixture = createBranchPushFixture();
+  try {
+    const candidatePathFingerprint = fingerprintCandidatePath(
+      fixture.candidate,
+    );
+    const expected = validateBranchPushCandidate(
+      fixture.candidate,
+      fixture.candidateSnapshot,
+      {
+        candidatePathFingerprint,
+        branch: fixture.branch,
+      },
+    );
+    assert.equal(expected.candidate_path, realpathSync(fixture.candidate));
+    assert.equal(
+      expected.head_commit,
+      fixture.candidateSnapshot.repository_snapshot.head_commit,
+    );
+    assert.throws(
+      () =>
+        validateBranchPushCandidate(
+          fixture.candidate,
+          fixture.candidateSnapshot,
+          {
+            candidatePathFingerprint: "f".repeat(64),
+            branch: fixture.branch,
+          },
+        ),
+      /canonical path fingerprint/u,
+    );
+    assert.throws(
+      () =>
+        validateBranchPushCandidate(
+          fixture.candidate,
+          fixture.candidateSnapshot,
+          {
+            candidatePathFingerprint,
+            branch: "maintain/another-run",
+          },
+        ),
+      /candidate branch/u,
+    );
+    const unsafeSnapshot = structuredClone(fixture.candidateSnapshot);
+    unsafeSnapshot.changed_files = ["docs/plans/private-plan.md"];
+    unsafeSnapshot.file_opt_map = {
+      "docs/plans/private-plan.md": ["OPT-001"],
+    };
+    unsafeSnapshot.process_artifact_prefixes = ["docs/plans/"];
+    assert.throws(
+      () =>
+        validateBranchPushCandidate(
+          fixture.candidate,
+          unsafeSnapshot,
+          {
+            candidatePathFingerprint,
+            branch: fixture.branch,
+          },
+        ),
+      /過程檔/u,
+    );
+    writeFileSync(
+      join(fixture.candidate, "SKILL.md"),
+      "source\nbranch push\ndirty\n",
+      "utf8",
+    );
+    assert.throws(
+      () =>
+        validateBranchPushCandidate(
+          fixture.candidate,
+          fixture.candidateSnapshot,
+          {
+            candidatePathFingerprint,
+            branch: fixture.branch,
+          },
+        ),
+      /必須先提交/u,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push helpers bind the approved commit and remote prestate", () => {
+  const remoteUrl = "https://github.com/example/skill.git";
+  const branch = "maintain/push-run";
+  const headCommit = "a".repeat(40);
+  const expectedRemoteCommit = "b".repeat(40);
+  const calls = [];
+  const runner = (repository, arguments_, options) => {
+    calls.push({ repository, arguments_, options });
+    if (arguments_[0] === "ls-remote") {
+      return `${headCommit}\trefs/heads/${branch}\n`;
+    }
+    if (arguments_[0] === "cat-file") {
+      return "";
+    }
+    if (arguments_[0] === "push") {
+      return "ok\n";
+    }
+    if (arguments_[0] === "merge-base") {
+      return `${headCommit}\n`;
+    }
+    throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+  };
+  assert.equal(
+    readGithubRemoteBranch("/candidate", {
+      remoteUrl,
+      branch,
+      gitConfigGlobal: "/tmp/isolated-gitconfig",
+      runner,
+    }),
+    headCommit,
+  );
+  assert.equal(
+    isCommitAncestor("/candidate", headCommit, headCommit, { runner }),
+    true,
+  );
+  pushGithubBranch("/candidate", {
+    remoteUrl,
+    branch,
+    headCommit,
+    expectedRemoteCommit,
+    gitConfigGlobal: "/tmp/isolated-gitconfig",
+    runner,
+  });
+  const push = calls.find(({ arguments_ }) => arguments_[0] === "push");
+  assert.deepEqual(push.arguments_, [
+    "push",
+    "--porcelain",
+    `--force-with-lease=refs/heads/${branch}:${expectedRemoteCommit}`,
+    "--",
+    remoteUrl,
+    `${headCommit}:refs/heads/${branch}`,
+  ]);
+  assert.equal(
+    push.arguments_.includes("--force"),
+    false,
+  );
+  assert.equal(
+    push.arguments_.some(
+      (value) => value === "--force-with-lease" ||
+        value === `--force-with-lease=refs/heads/${branch}`,
+    ),
+    false,
+  );
+  assert.equal(push.arguments_.includes("--set-upstream"), false);
+  assert.equal(
+    calls.every(
+      ({ options }) =>
+        options?.gitConfigGlobal === "/tmp/isolated-gitconfig" ||
+        options?.label === "Git fast-forward check",
+    ),
+    true,
+  );
+});
+
+test("Git ancestry ignores replacement refs and deprecated graft files", () => {
+  const fixture = createBranchPushFixture();
+  try {
+    const headCommit =
+      fixture.candidateSnapshot.repository_snapshot.head_commit;
+    const baseCommit =
+      fixture.candidateSnapshot.repository_snapshot.merge_base;
+    runGit(
+      fixture.candidate,
+      "switch",
+      "-c",
+      "maintain/divergent",
+      baseCommit,
+    );
+    runGit(
+      fixture.candidate,
+      "commit",
+      "--allow-empty",
+      "-m",
+      "divergent",
+    );
+    const divergentCommit = runGit(
+      fixture.candidate,
+      "rev-parse",
+      "HEAD",
+    );
+    runGit(fixture.candidate, "switch", fixture.branch);
+
+    runGit(
+      fixture.candidate,
+      "replace",
+      "--graft",
+      headCommit,
+      divergentCommit,
+    );
+    assert.equal(
+      runGit(
+        fixture.candidate,
+        "merge-base",
+        divergentCommit,
+        headCommit,
+      ),
+      divergentCommit,
+    );
+    assert.equal(
+      isCommitAncestor(
+        fixture.candidate,
+        divergentCommit,
+        headCommit,
+      ),
+      false,
+    );
+    runGit(fixture.candidate, "replace", "-d", headCommit);
+
+    writeFileSync(
+      join(fixture.candidate, ".git", "info", "grafts"),
+      `${headCommit} ${divergentCommit}\n`,
+      "utf8",
+    );
+    assert.equal(
+      runGit(
+        fixture.candidate,
+        "merge-base",
+        divergentCommit,
+        headCommit,
+      ),
+      divergentCommit,
+    );
+    assert.equal(
+      isCommitAncestor(
+        fixture.candidate,
+        divergentCommit,
+        headCommit,
+      ),
+      false,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push rejects a forced update result", () => {
+  assert.throws(
+    () =>
+      pushGithubBranch("/candidate", {
+        remoteUrl: "https://github.com/example/skill.git",
+        branch: "maintain/push-run",
+        headCommit: "a".repeat(40),
+        expectedRemoteCommit: "b".repeat(40),
+        runner: (repository, arguments_) => {
+          if (arguments_[0] === "cat-file") {
+            return "";
+          }
+          if (arguments_[0] === "push") {
+            return [
+              "To https://github.com/example/skill.git",
+              `+\t${"a".repeat(40)}:refs/heads/maintain/push-run\tforced update`,
+            ].join("\n");
+          }
+          throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+        },
+      }),
+    /forced update/u,
+  );
+});
+
+test("branch push preview rejects the base branch", () => {
+  const fixture = createBranchPushFixture();
+  try {
+    const state = branchPushState(fixture);
+    assert.throws(
+      () =>
+        buildGithubActionPreview("branch_push", {
+          ...state,
+          head_branch: state.base_branch,
+        }),
+      /base branch/u,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("managed branch push creates the exact remote branch with isolated auth config", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const state = branchPushState(fixture);
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    const originalOrigin = runGit(
+      fixture.candidate,
+      "remote",
+      "get-url",
+      "origin",
+    );
+    let setupConfig;
+    let pushed = false;
+    const gitCalls = [];
+    const gitRunner = (repository, arguments_, options) => {
+      gitCalls.push({ repository, arguments_, options });
+      if (arguments_[0] === "ls-remote") {
+        return pushed
+          ? `${state.head_commit}\trefs/heads/${state.head_branch}\n`
+          : "";
+      }
+      if (arguments_[0] === "cat-file") {
+        return "";
+      }
+      if (arguments_[0] === "push") {
+        pushed = true;
+        return "ok\n";
+      }
+      throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+    };
+    const runner = branchPushGithubRunner(state, {
+      onSetupGit: (environment) => {
+        setupConfig = environment.GIT_CONFIG_GLOBAL;
+        assert.equal(environment.GIT_CONFIG_NOSYSTEM, "1");
+        writeFileSync(setupConfig, "[credential]\n", "utf8");
+      },
+    });
+    const result = applyGithubAction(preview, approval, {
+      now: "2026-07-24T08:10:00.000Z",
+      runner,
+      gitRunner,
+      candidatePath: fixture.candidate,
+      candidateSnapshot: fixture.candidateSnapshot,
+      temporaryRoot,
+    });
+
+    assert.equal(result.action, "branch_push");
+    assert.equal(result.proof.operation, "create");
+    assert.equal(result.proof.forced, false);
+    assert.equal(result.proof.verified, true);
+    assert.equal(
+      result.proof.commit,
+      fixture.candidateSnapshot.repository_snapshot.head_commit,
+    );
+    const mutation = gitCalls.find(
+      ({ arguments_ }) => arguments_[0] === "push",
+    );
+    assert.deepEqual(mutation.arguments_.slice(0, 4), [
+      "push",
+      "--porcelain",
+      `--force-with-lease=refs/heads/${state.head_branch}:`,
+      "--",
+    ]);
+    assert.equal(
+      mutation.arguments_.at(-2),
+      "https://github.com/example/skill.git",
+    );
+    assert.equal(
+      mutation.arguments_.at(-1),
+      `${state.head_commit}:refs/heads/${state.head_branch}`,
+    );
+    assert.equal(
+      mutation.arguments_.includes("--force"),
+      false,
+    );
+    assert.equal(
+      runGit(fixture.candidate, "remote", "get-url", "origin"),
+      originalOrigin,
+    );
+    assert.ok(setupConfig);
+    assert.equal(existsSync(setupConfig), false);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push ignores candidate-local URL rewrites", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const state = branchPushState(fixture);
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    const trustedRoot = join(fixture.root, "trusted");
+    const trustedRemote = join(trustedRoot, "skill.git");
+    const maliciousRemote = join(fixture.root, "malicious.git");
+    mkdirSync(trustedRoot);
+    runGit(
+      fixture.root,
+      "clone",
+      "--bare",
+      fixture.candidate,
+      trustedRemote,
+    );
+    runGit(
+      fixture.root,
+      "clone",
+      "--bare",
+      fixture.candidate,
+      maliciousRemote,
+    );
+    const remoteRef = `refs/heads/${state.head_branch}`;
+    runGit(trustedRemote, "update-ref", "-d", remoteRef);
+    runGit(maliciousRemote, "update-ref", "-d", remoteRef);
+
+    const remoteUrl = "https://github.com/example/skill.git";
+    const maliciousUrl = pathToFileURL(maliciousRemote).href;
+    runGit(
+      fixture.candidate,
+      "config",
+      `url.${maliciousUrl}.insteadOf`,
+      remoteUrl,
+    );
+    runGit(
+      fixture.candidate,
+      "config",
+      `url.${maliciousUrl}.pushInsteadOf`,
+      remoteUrl,
+    );
+    assert.equal(
+      runGit(
+        fixture.candidate,
+        "ls-remote",
+        "--get-url",
+        remoteUrl,
+      ),
+      maliciousUrl,
+    );
+
+    const trustedPrefix = pathToFileURL(`${trustedRoot}/`).href;
+    const result = applyGithubAction(preview, approval, {
+      now: "2026-07-24T08:10:00.000Z",
+      runner: branchPushGithubRunner(state, {
+        onSetupGit: (environment) => {
+          writeFileSync(
+            environment.GIT_CONFIG_GLOBAL,
+            [
+              `[url "${trustedPrefix}"]`,
+              "\tinsteadOf = https://github.com/example/",
+              "\tpushInsteadOf = https://github.com/example/",
+              "",
+            ].join("\n"),
+            "utf8",
+          );
+        },
+      }),
+      candidatePath: fixture.candidate,
+      candidateSnapshot: fixture.candidateSnapshot,
+      temporaryRoot,
+    });
+
+    assert.equal(result.proof.commit, state.head_commit);
+    assert.equal(
+      runGit(trustedRemote, "rev-parse", remoteRef),
+      state.head_commit,
+    );
+    assert.equal(
+      runGit(maliciousRemote, "show-ref")
+        .split(/\r?\n/u)
+        .some((line) => line.endsWith(` ${remoteRef}`)),
+      false,
+    );
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("managed branch push fast-forwards or verifies the approved existing commit", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const previousCommit =
+      fixture.candidateSnapshot.repository_snapshot.merge_base;
+    const fastForwardState = branchPushState(fixture, {
+      expectedRemoteCommit: previousCommit,
+    });
+    const fastForwardPreview = buildGithubActionPreview(
+      "branch_push",
+      fastForwardState,
+    );
+    const fastForwardApproval = buildGithubActionApproval(
+      fastForwardPreview,
+      {
+        confirmedAt: "2026-07-24T08:00:00.000Z",
+        expiresAt: "2026-07-24T08:15:00.000Z",
+      },
+    );
+    let remoteCommit = previousCommit;
+    let pushCount = 0;
+    const gitRunner = (repository, arguments_) => {
+      if (arguments_[0] === "ls-remote") {
+        return `${remoteCommit}\trefs/heads/${fastForwardState.head_branch}\n`;
+      }
+      if (arguments_[0] === "merge-base") {
+        return `${previousCommit}\n`;
+      }
+      if (arguments_[0] === "cat-file") {
+        return "";
+      }
+      if (arguments_[0] === "push") {
+        pushCount += 1;
+        remoteCommit = fastForwardState.head_commit;
+        return "ok\n";
+      }
+      throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+    };
+    const fastForward = applyGithubAction(
+      fastForwardPreview,
+      fastForwardApproval,
+      {
+        now: "2026-07-24T08:10:00.000Z",
+        runner: branchPushGithubRunner(fastForwardState),
+        gitRunner,
+        candidatePath: fixture.candidate,
+        candidateSnapshot: fixture.candidateSnapshot,
+        temporaryRoot,
+      },
+    );
+    assert.equal(fastForward.proof.operation, "fast-forward");
+    assert.equal(
+      fastForward.proof.previous_remote_commit,
+      previousCommit,
+    );
+    assert.equal(pushCount, 1);
+
+    const verifyState = branchPushState(fixture, {
+      expectedRemoteCommit: fastForwardState.head_commit,
+    });
+    const verifyPreview = buildGithubActionPreview(
+      "branch_push",
+      verifyState,
+    );
+    const verifyApproval = buildGithubActionApproval(verifyPreview, {
+      confirmedAt: "2026-07-24T08:16:00.000Z",
+      expiresAt: "2026-07-24T08:30:00.000Z",
+    });
+    const verified = applyGithubAction(verifyPreview, verifyApproval, {
+      now: "2026-07-24T08:20:00.000Z",
+      runner: branchPushGithubRunner(verifyState),
+      gitRunner,
+      candidatePath: fixture.candidate,
+      candidateSnapshot: fixture.candidateSnapshot,
+      temporaryRoot,
+    });
+    assert.equal(verified.proof.operation, "verify-existing");
+    assert.equal(pushCount, 1);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push removes temporary Git configuration after a Git failure", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const state = branchPushState(fixture);
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    let setupConfig;
+    assert.throws(
+      () =>
+        applyGithubAction(preview, approval, {
+          now: "2026-07-24T08:10:00.000Z",
+          runner: branchPushGithubRunner(state, {
+            onSetupGit: (environment) => {
+              setupConfig = environment.GIT_CONFIG_GLOBAL;
+              writeFileSync(setupConfig, "[credential]\n", "utf8");
+            },
+          }),
+          gitRunner: () => {
+            throw new Error("simulated Git failure");
+          },
+          candidatePath: fixture.candidate,
+          candidateSnapshot: fixture.candidateSnapshot,
+          temporaryRoot,
+        }),
+      /simulated Git failure/u,
+    );
+    assert.ok(setupConfig);
+    assert.equal(existsSync(setupConfig), false);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("contributor branch push targets only the verified existing account fork", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const state = branchPushState(fixture, {
+      relationship: "contribute",
+    });
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    let pushed = false;
+    let pushedUrl;
+    const gitRunner = (repository, arguments_) => {
+      if (arguments_[0] === "ls-remote") {
+        return pushed
+          ? `${state.head_commit}\trefs/heads/${state.head_branch}\n`
+          : "";
+      }
+      if (arguments_[0] === "cat-file") {
+        return "";
+      }
+      if (arguments_[0] === "push") {
+        pushedUrl = arguments_.at(-2);
+        pushed = true;
+        return "ok\n";
+      }
+      throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+    };
+    const result = applyGithubAction(preview, approval, {
+      now: "2026-07-24T08:10:00.000Z",
+      runner: branchPushGithubRunner(state),
+      gitRunner,
+      candidatePath: fixture.candidate,
+      candidateSnapshot: fixture.candidateSnapshot,
+      temporaryRoot,
+    });
+    assert.equal(
+      pushedUrl,
+      "https://github.com/contributor/skill.git",
+    );
+    assert.equal(result.proof.relationship, "contribute");
+    assert.equal(result.proof.head_repository, "contributor/skill");
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("contributor branch push blocks a missing or unrelated fork before Git access", () => {
+  const fixture = createBranchPushFixture();
+  try {
+    const state = branchPushState(fixture, {
+      relationship: "contribute",
+    });
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    let gitCalls = 0;
+    assert.throws(
+      () =>
+        applyGithubAction(preview, approval, {
+          now: "2026-07-24T08:10:00.000Z",
+          runner: branchPushGithubRunner(state, {
+            forkAvailable: false,
+          }),
+          gitRunner: () => {
+            gitCalls += 1;
+            return "";
+          },
+          candidatePath: fixture.candidate,
+          candidateSnapshot: fixture.candidateSnapshot,
+        }),
+      /不支援自動建立 Fork/u,
+    );
+    assert.equal(gitCalls, 0);
+    assert.throws(
+      () =>
+        applyGithubAction(preview, approval, {
+          now: "2026-07-24T08:10:00.000Z",
+          runner: branchPushGithubRunner(state, {
+            forkParent: "other/project",
+          }),
+          gitRunner: () => {
+            gitCalls += 1;
+            return "";
+          },
+          candidatePath: fixture.candidate,
+          candidateSnapshot: fixture.candidateSnapshot,
+        }),
+      /owner、parent 或寫入權限/u,
+    );
+    assert.equal(gitCalls, 0);
+    assert.throws(
+      () =>
+        buildGithubActionPreview("branch_push", {
+          ...state,
+          relationship: "managed",
+          account: "example-user",
+          action_target: {
+            ...state.action_target,
+            head_repository: "contributor/skill",
+          },
+        }),
+      /同一 repository/u,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("fast-forward branch push blocks divergent remote history without force", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const previousCommit =
+      fixture.candidateSnapshot.repository_snapshot.merge_base;
+    const state = branchPushState(fixture, {
+      expectedRemoteCommit: previousCommit,
+    });
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    let pushCount = 0;
+    const gitRunner = (repository, arguments_) => {
+      if (arguments_[0] === "ls-remote") {
+        return `${previousCommit}\trefs/heads/${state.head_branch}\n`;
+      }
+      if (arguments_[0] === "merge-base") {
+        return `${state.head_commit}\n`;
+      }
+      if (arguments_[0] === "push") {
+        pushCount += 1;
+      }
+      throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+    };
+    assert.throws(
+      () =>
+        applyGithubAction(preview, approval, {
+          now: "2026-07-24T08:10:00.000Z",
+          runner: branchPushGithubRunner(state),
+          gitRunner,
+          candidatePath: fixture.candidate,
+          candidateSnapshot: fixture.candidateSnapshot,
+          temporaryRoot,
+        }),
+      /不是 fast-forward/u,
+    );
+    assert.equal(pushCount, 0);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push lease blocks a remote race after preflight", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const previousCommit =
+      fixture.candidateSnapshot.repository_snapshot.merge_base;
+    const state = branchPushState(fixture, {
+      expectedRemoteCommit: previousCommit,
+    });
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    let pushCount = 0;
+    const gitRunner = (repository, arguments_) => {
+      if (arguments_[0] === "ls-remote") {
+        return `${previousCommit}\trefs/heads/${state.head_branch}\n`;
+      }
+      if (arguments_[0] === "merge-base") {
+        return `${previousCommit}\n`;
+      }
+      if (arguments_[0] === "cat-file") {
+        return "";
+      }
+      if (arguments_[0] === "push") {
+        pushCount += 1;
+        assert.ok(
+          arguments_.includes(
+            `--force-with-lease=refs/heads/${state.head_branch}:${previousCommit}`,
+          ),
+        );
+        throw new Error("Git branch push 失敗：stale info");
+      }
+      throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+    };
+    assert.throws(
+      () =>
+        applyGithubAction(preview, approval, {
+          now: "2026-07-24T08:10:00.000Z",
+          runner: branchPushGithubRunner(state),
+          gitRunner,
+          candidatePath: fixture.candidate,
+          candidateSnapshot: fixture.candidateSnapshot,
+          temporaryRoot,
+        }),
+      /stale info/u,
+    );
+    assert.equal(pushCount, 1);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push rejects replaced divergent history before a real bare remote mutation", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const headCommit =
+      fixture.candidateSnapshot.repository_snapshot.head_commit;
+    const baseCommit =
+      fixture.candidateSnapshot.repository_snapshot.merge_base;
+    runGit(
+      fixture.candidate,
+      "switch",
+      "-c",
+      "maintain/divergent",
+      baseCommit,
+    );
+    runGit(
+      fixture.candidate,
+      "commit",
+      "--allow-empty",
+      "-m",
+      "divergent",
+    );
+    const divergentCommit = runGit(
+      fixture.candidate,
+      "rev-parse",
+      "HEAD",
+    );
+    runGit(fixture.candidate, "switch", fixture.branch);
+    runGit(
+      fixture.candidate,
+      "replace",
+      "--graft",
+      headCommit,
+      divergentCommit,
+    );
+
+    const bareRemote = join(fixture.root, "remote.git");
+    runGit(fixture.root, "clone", "--bare", fixture.candidate, bareRemote);
+    runGit(
+      bareRemote,
+      "update-ref",
+      `refs/heads/${fixture.branch}`,
+      divergentCommit,
+    );
+    const state = branchPushState(fixture, {
+      expectedRemoteCommit: divergentCommit,
+    });
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    const remoteUrl = "https://github.com/example/skill.git";
+    assert.throws(
+      () =>
+        applyGithubAction(preview, approval, {
+          now: "2026-07-24T08:10:00.000Z",
+          runner: branchPushGithubRunner(state),
+          gitRunner: localRemoteGitRunner(
+            new Map([[remoteUrl, bareRemote]]),
+          ),
+          candidatePath: fixture.candidate,
+          candidateSnapshot: fixture.candidateSnapshot,
+          temporaryRoot,
+        }),
+      /不是 fast-forward/u,
+    );
+    assert.equal(
+      runGit(
+        bareRemote,
+        "rev-parse",
+        `refs/heads/${fixture.branch}`,
+      ),
+      divergentCommit,
+    );
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push exact lease preserves a concurrently updated real bare remote", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const baseCommit =
+      fixture.candidateSnapshot.repository_snapshot.merge_base;
+    runGit(
+      fixture.candidate,
+      "switch",
+      "-c",
+      "maintain/race",
+      baseCommit,
+    );
+    runGit(
+      fixture.candidate,
+      "commit",
+      "--allow-empty",
+      "-m",
+      "concurrent update",
+    );
+    const raceCommit = runGit(fixture.candidate, "rev-parse", "HEAD");
+    runGit(fixture.candidate, "switch", fixture.branch);
+
+    const bareRemote = join(fixture.root, "remote.git");
+    runGit(fixture.root, "clone", "--bare", fixture.candidate, bareRemote);
+    const remoteRef = `refs/heads/${fixture.branch}`;
+    runGit(bareRemote, "update-ref", remoteRef, baseCommit);
+    const state = branchPushState(fixture, {
+      expectedRemoteCommit: baseCommit,
+    });
+    const preview = buildGithubActionPreview("branch_push", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    const remoteUrl = "https://github.com/example/skill.git";
+    let raced = false;
+    const gitRunner = localRemoteGitRunner(
+      new Map([[remoteUrl, bareRemote]]),
+      {
+        beforePush: () => {
+          if (!raced) {
+            runGit(
+              bareRemote,
+              "update-ref",
+              remoteRef,
+              raceCommit,
+              baseCommit,
+            );
+            raced = true;
+          }
+        },
+      },
+    );
+    assert.throws(
+      () =>
+        applyGithubAction(preview, approval, {
+          now: "2026-07-24T08:10:00.000Z",
+          runner: branchPushGithubRunner(state),
+          gitRunner,
+          candidatePath: fixture.candidate,
+          candidateSnapshot: fixture.candidateSnapshot,
+          temporaryRoot,
+        }),
+      /failed to push/u,
+    );
+    assert.equal(raced, true);
+    assert.equal(
+      runGit(bareRemote, "rev-parse", remoteRef),
+      raceCommit,
+    );
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push reconcile proves applied and exact not-applied remote states", () => {
+  const fixture = createBranchPushFixture();
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
+  try {
+    const state = branchPushState(fixture);
+    const preview = buildGithubActionPreview("branch_push", state);
+    const identityRunner = branchPushGithubRunner(state);
+    const runner = (arguments_, options) => {
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] ===
+          `repos/${state.repository}/branches/${state.base_branch}`
+      ) {
+        throw new Error(
+          "branch reconcile must not require an unchanged base commit",
+        );
+      }
+      return identityRunner(arguments_, options);
+    };
+    const applied = reconcileGithubAction(preview, {
+      runner,
+      gitRunner: (repository, arguments_) => {
+        assert.equal(arguments_[0], "ls-remote");
+        return `${state.head_commit}\trefs/heads/${state.head_branch}\n`;
+      },
+      temporaryRoot,
+    });
+    assert.equal(applied.status, "applied");
+    assert.equal(applied.proof.commit, state.head_commit);
+
+    const notApplied = reconcileGithubAction(preview, {
+      approvalFingerprint: "d".repeat(64),
+      now: "2026-07-24T08:10:00.000Z",
+      runner,
+      gitRunner: () => "",
+      temporaryRoot,
+    });
+    assert.equal(notApplied.status, "not_applied");
+    assert.equal(notApplied.absence_proof.action, "branch_push");
+    assert.equal(
+      notApplied.absence_proof.approval_fingerprint,
+      "d".repeat(64),
+    );
+    assert.equal(
+      notApplied.absence_proof.remote_state_hash.length,
+      64,
+    );
+    assert.throws(
+      () =>
+        reconcileGithubAction(preview, {
+          approvalFingerprint: "d".repeat(64),
+          now: "2026-07-24T08:10:00.000Z",
+          runner,
+          gitRunner: () =>
+            `${"c".repeat(40)}\trefs/heads/${state.head_branch}\n`,
+          temporaryRoot,
+        }),
+      /遠端狀態已漂移/u,
+    );
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test("release inventory covers the complete previous-tag range", () => {

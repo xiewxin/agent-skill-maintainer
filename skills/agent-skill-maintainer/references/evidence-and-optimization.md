@@ -19,6 +19,8 @@ Allocate IDs sequentially with three or more digits: `FB-001`, `FB-002`, and so 
 
 User correction is strong evidence, not automatic proof. No correction does not remove the duty to inspect observable failures, wrong decisions, unsafe actions, incorrect attribution, and unnecessary cost.
 
+The user-selected target Skill and its relevant references are also evidence. When their instructions directly reproduce an unsafe action, contradiction, missing lifecycle boundary, or workflow that cannot close, record the independently actionable defect even if the user reported a different symptom or no incident yet. File evidence must identify the exact instruction and deterministic consequence; it is not permission to speculate about behavior absent from the selected files.
+
 ## `OPT-*` contract
 
 Convert validated feedback only when the change has:
@@ -30,6 +32,8 @@ Convert validated feedback only when the change has:
 - documentation impact under the target repository's existing guidance contract;
 - generalizable value and confidence;
 - decision status and reason.
+
+Do not collapse separate actionable failures merely because they appear in the same file or publication flow. Keep one `FB-*`／`OPT-*` per failure when ownership, minimum change, regression case, or closure can differ.
 
 Decision status is one of `accepted`, `rejected`, `deferred`, or `needs_evidence`. A new proposal starts as `deferred`, or `needs_evidence` when its contract is incomplete. Only an explicit user decision may change the exact proposal to `accepted` or `rejected`; do not infer acceptance from a request to analyze, review, or propose improvements. Only accepted IDs enter implementation approval. If accepted content changes, request a new approval.
 

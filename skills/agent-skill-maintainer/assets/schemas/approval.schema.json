@@ -7,7 +7,7 @@
   "required": ["schema_version", "action", "run_id", "binding_id", "relationship", "repository", "head_commit", "diff_hash", "process_artifact_prefixes", "approved_opt_ids", "optimizations_hash", "fingerprint"],
   "properties": {
     "schema_version": {"type": "integer", "const": 1},
-    "action": {"type": "string", "enum": ["implementation", "pr_create", "pr_update", "merge", "release", "local_update", "cleanup"]},
+    "action": {"type": "string", "enum": ["implementation", "branch_push", "pr_create", "pr_update", "merge", "release", "local_update", "cleanup"]},
     "run_id": {"type": "string", "minLength": 1},
     "binding_id": {"type": "string", "minLength": 1},
     "relationship": {"type": "string", "enum": ["managed", "contribute"]},

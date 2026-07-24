@@ -15,10 +15,32 @@ import { fileURLToPath } from "node:url";
 import {
   validatePublication,
   validateStructuredAssets,
+  validateTrackedProcessArtifacts,
 } from "../scripts/validate-publication.mjs";
 import {
   validateForwardEvaluationAggregate,
+  validateForwardEvaluationFixture,
 } from "../evals/run-evals.mjs";
+import {
+  buildValidationResult,
+  fingerprint,
+  loadProviderProfiles,
+} from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
+import {
+  createRun,
+  readRun,
+  transitionRun,
+} from "../skills/agent-skill-maintainer/scripts/lib/state.mjs";
+import {
+  runMaintainerCommand,
+} from "../skills/agent-skill-maintainer/scripts/maintainer.mjs";
+import {
+  branchPushGithubRunner,
+  createBranchPushFixture,
+  initializeRepository,
+  localRemoteGitRunner,
+  runGit,
+} from "./fixtures.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
@@ -38,6 +60,204 @@ function read(relativePath) {
     "\r\n",
     "\n",
   );
+}
+
+/** Creates one committed branch-push candidate for CLI contract tests. */
+function createCliBranchPushFixture({ relationship = "managed" } = {}) {
+  const fixture = createBranchPushFixture({
+    prefix: "maintainer-cli-push-",
+    candidateName: "cli-push",
+    branchName: "maintain/cli-push",
+    relationship,
+  });
+  const documentationImpact = {
+    schema_version: 1,
+    status: "updated",
+    changed_guides: ["README.md"],
+    root_index_action: "verified-current",
+    contract_preserved: true,
+    reason: "README reflects the approved branch-push behavior.",
+  };
+  const validationSummary = buildValidationResult(
+    fixture.candidateSnapshot,
+    {
+    checks: [
+      {
+        id: "publication",
+        category: "safety",
+        status: "passed",
+        summary: "Publication safety passed.",
+      },
+      {
+        id: "regression",
+        category: "regression",
+        status: "passed",
+        summary: "Regression tests passed.",
+      },
+      {
+        id: "forward",
+        category: "forward",
+        status: "passed",
+        summary: "Forward contracts passed.",
+      },
+      {
+        id: "quality",
+        category: "quality",
+        status: "passed",
+        summary: "Quality checks passed.",
+      },
+      {
+        id: "agent-documentation-impact",
+        category: "documentation",
+        status: "passed",
+        summary: "Maintainer guidance is current.",
+        details: documentationImpact,
+      },
+    ],
+    requiredCheckIds: new Set([
+      "publication",
+      "regression",
+      "forward",
+      "quality",
+      "agent-documentation-impact",
+    ]),
+    },
+  );
+  return {
+    ...fixture,
+    validationSummary,
+  };
+}
+
+/** Advances one CLI test run to the validation phase. */
+function prepareCliValidationRun(fixture) {
+  const stateRoot = join(fixture.root, "state");
+  createRun(stateRoot, {
+    runId: "run-001",
+    bindingId: "binding-001",
+    target: {
+      skill: "example-skill",
+      repository: "example/skill",
+    },
+  });
+  for (const [phase, updates] of [
+    ["evidence_collection", {}],
+    ["feedback_validation", {}],
+    ["optimization_design", {}],
+    ["optimization_approval", {}],
+    [
+      "isolation",
+      {
+        repository_snapshot: fixture.repositorySnapshot,
+        approvals: [fixture.implementationApproval],
+      },
+    ],
+    ["implementation", {}],
+    [
+      "validation",
+      { candidate_snapshot: fixture.candidateSnapshot },
+    ],
+  ]) {
+    transitionRun(stateRoot, "run-001", phase, { updates });
+  }
+  return stateRoot;
+}
+
+/** Prepares one branch-push preview, approval, and lifecycle transition. */
+function prepareCliBranchPushAction(
+  fixture,
+  {
+    account =
+      fixture.binding.relationship === "managed"
+        ? "example-user"
+        : "contributor",
+    headRepository =
+      fixture.binding.relationship === "managed"
+        ? "example/skill"
+        : "contributor/skill",
+  } = {},
+) {
+  const stateRoot = prepareCliValidationRun(fixture);
+  const actionStatePath = resolve(fixture.root, "branch-state.json");
+  const previewPath = resolve(fixture.root, "branch-preview.json");
+  const approvalPath = resolve(fixture.root, "branch-approval.json");
+  const updatesPath = resolve(fixture.root, "branch-updates.json");
+  const repository = fixture.candidateSnapshot.repository_snapshot;
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account,
+    repository: "example/skill",
+    relationship: fixture.binding.relationship,
+    base_branch: repository.base_ref,
+    base_commit: repository.merge_base,
+    head_branch: fixture.branch,
+    head_commit: repository.head_commit,
+    diff_hash: fixture.candidateSnapshot.candidate_diff_hash,
+    action_target: {
+      expected_remote_commit: null,
+      head_repository: headRepository,
+      operation: "create",
+    },
+    release_enabled: false,
+    provider_contract_hash: fingerprint(loadProviderProfiles()),
+  };
+  writeFileSync(
+    actionStatePath,
+    `${JSON.stringify(state)}\n`,
+    "utf8",
+  );
+  const preview = runMaintainerCommand([
+    "github-preview",
+    "--action",
+    "branch_push",
+    "--state",
+    actionStatePath,
+    "--candidate",
+    fixture.candidate,
+  ]);
+  writeFileSync(previewPath, `${JSON.stringify(preview)}\n`, "utf8");
+  const now = Date.now();
+  const approval = runMaintainerCommand([
+    "github-approve",
+    "--preview",
+    previewPath,
+    "--confirmed-at",
+    new Date(now - 60_000).toISOString(),
+    "--expires-at",
+    new Date(now + 10 * 60_000).toISOString(),
+  ]);
+  writeFileSync(approvalPath, `${JSON.stringify(approval)}\n`, "utf8");
+  writeFileSync(
+    updatesPath,
+    `${JSON.stringify({
+      validation_summary: fixture.validationSummary,
+      action_preview: preview,
+      approvals: [approval],
+    })}\n`,
+    "utf8",
+  );
+  const transitioned = runMaintainerCommand([
+    "transition",
+    "--state-root",
+    stateRoot,
+    "--run-id",
+    "run-001",
+    "--phase",
+    "branch_push",
+    "--updates",
+    updatesPath,
+  ]);
+  return {
+    stateRoot,
+    state,
+    preview,
+    approval,
+    actionStatePath,
+    previewPath,
+    approvalPath,
+    transitioned,
+  };
 }
 
 test("required public files and maintainer guidance exist", () => {
@@ -60,6 +280,8 @@ test("required public files and maintainer guidance exist", () => {
     ".agents/documentation.md",
     ".agents/releasing.md",
     ".agents/adr/0001-node-runtime.md",
+    ".agents/adr/0002-deterministic-branch-push.md",
+    "evals/cases/sample-cleanup-forward.json",
   ];
   assert.deepEqual(
     required.filter((relativePath) => {
@@ -95,6 +317,8 @@ test("README documents Preview, npx installation, and zero-dependency Node runti
     "No `npm install`",
     "github-preview",
     "github-reconcile",
+    "branch_push",
+    "--candidate",
     "explicit confirmation",
   ]) {
     assert.ok(content.includes(phrase), `README missing: ${phrase}`);
@@ -128,6 +352,9 @@ test("Skill metadata, trigger cases, references, and Preview boundary remain com
   assert.ok(skill.includes("do not substitute manual GitHub commands"));
   assert.ok(skill.includes("local-candidate Preview"));
   assert.ok(skill.includes("state-bound GitHub apply"));
+  assert.ok(skill.includes("branch push"));
+  assert.ok(skill.includes("explicit expected-value lease"));
+  assert.ok(skill.includes("replacement refs and graft files"));
   assert.ok(skill.includes("explicit confirmation"));
   assert.ok(skill.includes("`FB-001`"));
   assert.ok(skill.includes("`OPT-001`"));
@@ -351,8 +578,428 @@ test("CLI creates state-bound GitHub previews and expiring approvals", () => {
       previewDocument.fingerprint,
     );
     assert.equal(approvalDocument.fingerprint.length, 64);
+
+    const candidate = resolve(root, "candidate");
+    initializeRepository(candidate);
+    runGit(candidate, "switch", "-c", "maintain/preview");
+    const candidateHead = runGit(candidate, "rev-parse", "HEAD");
+    writeFileSync(
+      statePath,
+      `${JSON.stringify({
+        run_id: "run-001",
+        binding_id: "binding-001",
+        account: "example-user",
+        repository: "example/skill",
+        relationship: "managed",
+        base_branch: "main",
+        base_commit: candidateHead,
+        head_branch: "maintain/preview",
+        head_commit: candidateHead,
+        diff_hash: "b".repeat(64),
+        action_target: {
+          expected_remote_commit: null,
+          head_repository: "example/skill",
+          operation: "create",
+        },
+        release_enabled: false,
+        provider_contract_hash: "c".repeat(64),
+      })}\n`,
+      "utf8",
+    );
+    const branchPreview = runNode(
+      CLI,
+      "github-preview",
+      "--action",
+      "branch_push",
+      "--state",
+      statePath,
+      "--candidate",
+      candidate,
+    );
+    assert.equal(branchPreview.status, 0, branchPreview.stderr);
+    const branchDocument = JSON.parse(branchPreview.stdout);
+    assert.equal(branchDocument.action, "branch_push");
+    assert.equal(
+      branchDocument.state.action_target.candidate_path_fingerprint.length,
+      64,
+    );
+    assert.equal(branchDocument.state.action_target.operation, "create");
+
+    const invalidCandidate = runNode(
+      CLI,
+      "github-preview",
+      "--action",
+      "pr_create",
+      "--state",
+      statePath,
+      "--candidate",
+      candidate,
+    );
+    assert.equal(invalidCandidate.status, 1);
+    assert.match(invalidCandidate.stderr, /只適用於 branch_push/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI branch push completes approval apply and reconcile", () => {
+  const fixture = createCliBranchPushFixture();
+  try {
+    const prepared = prepareCliBranchPushAction(fixture);
+    const {
+      stateRoot,
+      state,
+      previewPath,
+      approvalPath,
+      transitioned,
+    } = prepared;
+    const repository = fixture.candidateSnapshot.repository_snapshot;
+    assert.equal(transitioned.phase, "branch_push");
+
+    let pushed = false;
+    const githubRunner = branchPushGithubRunner(state);
+    const gitRunner = (candidate, arguments_) => {
+      if (arguments_[0] === "ls-remote") {
+        return pushed
+          ? `${repository.head_commit}\trefs/heads/${fixture.branch}\n`
+          : "";
+      }
+      if (arguments_[0] === "cat-file") {
+        assert.notEqual(candidate, fixture.candidate);
+        return "";
+      }
+      if (arguments_[0] === "push") {
+        assert.notEqual(candidate, fixture.candidate);
+        assert.ok(
+          arguments_.includes(
+            `--force-with-lease=refs/heads/${fixture.branch}:`,
+          ),
+        );
+        assert.equal(
+          arguments_.at(-1),
+          `${repository.head_commit}:refs/heads/${fixture.branch}`,
+        );
+        pushed = true;
+        return [
+          "To https://github.com/example/skill.git",
+          `*\t${repository.head_commit}:refs/heads/${fixture.branch}\t[new branch]`,
+        ].join("\n");
+      }
+      throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+    };
+    const applied = runMaintainerCommand(
+      [
+        "github-apply",
+        "--state-root",
+        stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        previewPath,
+        "--approval",
+        approvalPath,
+        "--candidate",
+        fixture.candidate,
+      ],
+      {
+        githubRunner,
+        gitRunner,
+        temporaryRoot: fixture.root,
+      },
+    );
+    assert.equal(applied.action, "branch_push");
+    assert.equal(applied.proof.verified, true);
+    assert.equal(
+      readRun(stateRoot, "run-001")
+        .github_action_attempts.at(-1).action,
+      "branch_push",
+    );
+
+    const reconciled = runMaintainerCommand(
+      [
+        "github-reconcile",
+        "--state-root",
+        stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        previewPath,
+        "--approval",
+        approvalPath,
+      ],
+      {
+        githubRunner,
+        gitRunner,
+        temporaryRoot: fixture.root,
+      },
+    );
+    assert.equal(reconciled.status, "applied");
+    assert.equal(reconciled.proof.commit, repository.head_commit);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("CLI branch push records not-applied proof before allowing a new approval", () => {
+  const fixture = createCliBranchPushFixture();
+  try {
+    const prepared = prepareCliBranchPushAction(fixture);
+    const {
+      stateRoot,
+      state,
+      preview,
+      actionStatePath,
+      previewPath,
+      approvalPath,
+    } = prepared;
+    const githubRunner = branchPushGithubRunner(state);
+    assert.throws(
+      () =>
+        runMaintainerCommand(
+          [
+            "github-apply",
+            "--state-root",
+            stateRoot,
+            "--run-id",
+            "run-001",
+            "--preview",
+            previewPath,
+            "--approval",
+            approvalPath,
+            "--candidate",
+            fixture.candidate,
+          ],
+          {
+            githubRunner,
+            gitRunner: () => {
+              throw new Error("simulated pre-push interruption");
+            },
+            temporaryRoot: fixture.root,
+          },
+        ),
+      /simulated pre-push interruption/u,
+    );
+    assert.equal(
+      readRun(stateRoot, "run-001").github_action_attempts.length,
+      1,
+    );
+
+    const reconciled = runMaintainerCommand(
+      [
+        "github-reconcile",
+        "--state-root",
+        stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        previewPath,
+        "--approval",
+        approvalPath,
+      ],
+      {
+        githubRunner,
+        gitRunner: () => "",
+        temporaryRoot: fixture.root,
+      },
+    );
+    assert.equal(reconciled.status, "not_applied");
+    const afterReconcile = readRun(stateRoot, "run-001");
+    assert.equal(
+      afterReconcile.github_action_reconciliations.at(-1).status,
+      "not_applied",
+    );
+
+    const retryPreviewPath = resolve(
+      fixture.root,
+      "branch-retry-preview.json",
+    );
+    const retryApprovalPath = resolve(
+      fixture.root,
+      "branch-retry-approval.json",
+    );
+    const retryUpdatesPath = resolve(
+      fixture.root,
+      "branch-retry-updates.json",
+    );
+    const retryPreview = runMaintainerCommand([
+      "github-preview",
+      "--action",
+      "branch_push",
+      "--state",
+      actionStatePath,
+      "--candidate",
+      fixture.candidate,
+    ]);
+    assert.deepEqual(retryPreview, preview);
+    writeFileSync(
+      retryPreviewPath,
+      `${JSON.stringify(retryPreview)}\n`,
+      "utf8",
+    );
+    const retryNow = Date.now();
+    const retryApproval = runMaintainerCommand([
+      "github-approve",
+      "--preview",
+      retryPreviewPath,
+      "--confirmed-at",
+      new Date(retryNow - 30_000).toISOString(),
+      "--expires-at",
+      new Date(retryNow + 10 * 60_000).toISOString(),
+    ]);
+    writeFileSync(
+      retryApprovalPath,
+      `${JSON.stringify(retryApproval)}\n`,
+      "utf8",
+    );
+    writeFileSync(
+      retryUpdatesPath,
+      `${JSON.stringify({
+        validation_summary: fixture.validationSummary,
+        action_preview: retryPreview,
+        approvals: [retryApproval],
+      })}\n`,
+      "utf8",
+    );
+    const retried = runMaintainerCommand([
+      "transition",
+      "--state-root",
+      stateRoot,
+      "--run-id",
+      "run-001",
+      "--phase",
+      "branch_push",
+      "--updates",
+      retryUpdatesPath,
+    ]);
+    assert.equal(retried.phase, "branch_push");
+    assert.equal(
+      retried.consumed_approval_fingerprints.includes(
+        retryApproval.fingerprint,
+      ),
+      true,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("CLI contributor branch push writes only the verified existing Fork", () => {
+  const fixture = createCliBranchPushFixture({
+    relationship: "contribute",
+  });
+  try {
+    const prepared = prepareCliBranchPushAction(fixture);
+    const upstreamRemote = resolve(fixture.root, "upstream.git");
+    const forkRemote = resolve(fixture.root, "fork.git");
+    runGit(
+      fixture.root,
+      "clone",
+      "--bare",
+      fixture.candidate,
+      upstreamRemote,
+    );
+    runGit(
+      fixture.root,
+      "clone",
+      "--bare",
+      fixture.candidate,
+      forkRemote,
+    );
+    const remoteRef = `refs/heads/${fixture.branch}`;
+    runGit(upstreamRemote, "update-ref", "-d", remoteRef);
+    runGit(forkRemote, "update-ref", "-d", remoteRef);
+    const result = runMaintainerCommand(
+      [
+        "github-apply",
+        "--state-root",
+        prepared.stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        prepared.previewPath,
+        "--approval",
+        prepared.approvalPath,
+        "--candidate",
+        fixture.candidate,
+      ],
+      {
+        githubRunner: branchPushGithubRunner(prepared.state),
+        gitRunner: localRemoteGitRunner(
+          new Map([
+            [
+              "https://github.com/example/skill.git",
+              upstreamRemote,
+            ],
+            [
+              "https://github.com/contributor/skill.git",
+              forkRemote,
+            ],
+          ]),
+        ),
+        temporaryRoot: fixture.root,
+      },
+    );
+    assert.equal(result.action, "branch_push");
+    assert.equal(result.proof.relationship, "contribute");
+    assert.equal(result.proof.head_repository, "contributor/skill");
+    assert.equal(
+      runGit(forkRemote, "rev-parse", remoteRef),
+      fixture.candidateSnapshot.repository_snapshot.head_commit,
+    );
+    assert.equal(
+      runGit(
+        upstreamRemote,
+        "for-each-ref",
+        "--format=%(objectname)",
+        remoteRef,
+      ),
+      "",
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("CLI contributor branch push blocks a missing Fork before Git access", () => {
+  const fixture = createCliBranchPushFixture({
+    relationship: "contribute",
+  });
+  try {
+    const prepared = prepareCliBranchPushAction(fixture);
+    let gitCalls = 0;
+    assert.throws(
+      () =>
+        runMaintainerCommand(
+          [
+            "github-apply",
+            "--state-root",
+            prepared.stateRoot,
+            "--run-id",
+            "run-001",
+            "--preview",
+            prepared.previewPath,
+            "--approval",
+            prepared.approvalPath,
+            "--candidate",
+            fixture.candidate,
+          ],
+          {
+            githubRunner: branchPushGithubRunner(
+              prepared.state,
+              { forkAvailable: false },
+            ),
+            gitRunner: () => {
+              gitCalls += 1;
+              return "";
+            },
+            temporaryRoot: fixture.root,
+          },
+        ),
+      /不支援自動建立 Fork/u,
+    );
+    assert.equal(gitCalls, 0);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
@@ -420,6 +1067,23 @@ test("publication, evaluation, and repository validators execute directly", () =
   assert.ok(repositoryReport.missing.includes("release_immutability"));
 });
 
+test("publication blocks tracked process artifacts but permits focused product files", () => {
+  assert.deepEqual(
+    validateTrackedProcessArtifacts([
+      "skills/agent-skill-maintainer/SKILL.md",
+      "tests/git.test.mjs",
+      "docs/plans/private-plan.md",
+      "evals/results/raw-output.json",
+      ".agent-skill-maintainer/runs/run-001.json",
+    ]),
+    [
+      "tracked process artifact is not allowed: docs/plans/private-plan.md",
+      "tracked process artifact is not allowed: evals/results/raw-output.json",
+      "tracked process artifact is not allowed: .agent-skill-maintainer/runs/run-001.json",
+    ],
+  );
+});
+
 test("forward evaluation aggregate rejects self-reported count drift", () => {
   const aggregate = JSON.parse(
     read("evals/evidence/preview-v0.1.0.json"),
@@ -436,6 +1100,23 @@ test("forward evaluation aggregate rejects self-reported count drift", () => {
     validateForwardEvaluationAggregate(aggregate, {
       currentSkillFingerprint,
     }).forward.passed,
+    false,
+  );
+});
+
+test("forward fixture keeps positive discovery and negative non-trigger contracts stable", () => {
+  const fixture = JSON.parse(
+    read("evals/cases/sample-cleanup-forward.json"),
+  );
+  assert.equal(validateForwardEvaluationFixture(fixture), true);
+  assert.equal(
+    validateForwardEvaluationFixture({
+      ...fixture,
+      positive_expectations: {
+        ...fixture.positive_expectations,
+        minimum_defect_findings: 1,
+      },
+    }),
     false,
   );
 });

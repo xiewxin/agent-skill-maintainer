@@ -19,7 +19,9 @@ import {
   buildGithubActionApproval,
   buildGithubActionPreview,
   reconcileGithubAction,
+  validateBranchPushLocalState,
 } from "./lib/github.mjs";
+import { fingerprintCandidatePath } from "./lib/git.mjs";
 import {
   authorizeGithubActionReconcile,
   createRun,
@@ -51,6 +53,10 @@ function parseArguments(argv) {
   }
   const values = {};
   const repeated = { explicit: [], candidate: [] };
+  const repeatable =
+    command === "target"
+      ? new Set(["explicit", "candidate"])
+      : new Set();
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (!token.startsWith("--") || token.length === 2) {
@@ -62,7 +68,7 @@ function parseArguments(argv) {
       throw new Error(`參數缺少值：--${name}`);
     }
     index += 1;
-    if (Object.hasOwn(repeated, name)) {
+    if (repeatable.has(name)) {
       repeated[name].push(value);
     } else {
       if (Object.hasOwn(values, name)) {
@@ -88,7 +94,7 @@ function parseArguments(argv) {
       "updates",
     ]),
     validate: new Set(["schema", "input"]),
-    "github-preview": new Set(["action", "state"]),
+    "github-preview": new Set(["action", "state", "candidate"]),
     "github-approve": new Set([
       "preview",
       "confirmed-at",
@@ -99,6 +105,7 @@ function parseArguments(argv) {
       "run-id",
       "preview",
       "approval",
+      "candidate",
     ]),
     "github-reconcile": new Set([
       "state-root",
@@ -141,8 +148,15 @@ function readJsonFile(path, label) {
   return document;
 }
 
-/** Executes one parsed deterministic command. */
-function execute({ command, values, repeated }) {
+/** Executes one parsed deterministic command with optional test runners. */
+function execute(
+  { command, values, repeated },
+  {
+    githubRunner,
+    gitRunner,
+    temporaryRoot,
+  } = {},
+) {
   if (command === "target") {
     return selectTargets({
       explicitTargets: repeated.explicit,
@@ -188,9 +202,36 @@ function execute({ command, values, repeated }) {
     return { schema, valid: true };
   }
   if (command === "github-preview") {
+    const action = required(values, "action");
+    const state = readJsonFile(
+      required(values, "state"),
+      "GitHub action state",
+    );
+    if (action === "branch_push") {
+      const candidate = required(values, "candidate");
+      const pathFingerprint = fingerprintCandidatePath(candidate);
+      const supplied =
+        state.action_target?.candidate_path_fingerprint;
+      if (supplied !== undefined && supplied !== pathFingerprint) {
+        throw new Error(
+          "GitHub action state 的 candidate path fingerprint 已漂移",
+        );
+      }
+      if (
+        state.action_target === null ||
+        typeof state.action_target !== "object" ||
+        Array.isArray(state.action_target)
+      ) {
+        throw new Error("branch push action_target 必須是 object");
+      }
+      state.action_target.candidate_path_fingerprint =
+        pathFingerprint;
+    } else if (values.candidate !== undefined) {
+      throw new Error("--candidate 只適用於 branch_push");
+    }
     return buildGithubActionPreview(
-      required(values, "action"),
-      readJsonFile(required(values, "state"), "GitHub action state"),
+      action,
+      state,
     );
   }
   if (command === "github-approve") {
@@ -211,9 +252,23 @@ function execute({ command, values, repeated }) {
       required(values, "approval"),
       "GitHub action approval",
     );
+    const stateRoot = values["state-root"] ?? DEFAULT_STATE_ROOT;
+    const runId = required(values, "run-id");
+    let candidatePath;
+    if (preview.action === "branch_push") {
+      candidatePath = required(values, "candidate");
+      const active = readRun(stateRoot, runId);
+      validateBranchPushLocalState(
+        preview,
+        candidatePath,
+        active.candidate_snapshot,
+      );
+    } else if (values.candidate !== undefined) {
+      throw new Error("--candidate 只適用於 branch_push");
+    }
     const reserved = reserveGithubActionApply(
-      values["state-root"] ?? DEFAULT_STATE_ROOT,
-      required(values, "run-id"),
+      stateRoot,
+      runId,
       preview,
       approval,
       {
@@ -223,7 +278,14 @@ function execute({ command, values, repeated }) {
     const documentationImpact = reserved.validation_summary?.checks?.find(
       (check) => check?.category === "documentation",
     )?.details ?? null;
-    return applyGithubAction(preview, approval, { documentationImpact });
+    return applyGithubAction(preview, approval, {
+      candidatePath,
+      candidateSnapshot: reserved.candidate_snapshot,
+      documentationImpact,
+      runner: githubRunner,
+      gitRunner,
+      temporaryRoot,
+    });
   }
   if (command === "github-reconcile") {
     const preview = readJsonFile(
@@ -249,6 +311,9 @@ function execute({ command, values, repeated }) {
     const result = reconcileGithubAction(preview, {
       documentationImpact,
       approvalFingerprint: approval.fingerprint,
+      runner: githubRunner,
+      gitRunner,
+      temporaryRoot,
     });
     if (result.status === "not_applied") {
       recordGithubActionReconciliation(
@@ -267,13 +332,18 @@ function execute({ command, values, repeated }) {
   throw new Error(`未知命令：${command}`);
 }
 
+/** Parses and executes one command for CLI and contract-test parity. */
+export function runMaintainerCommand(argv, dependencies = {}) {
+  return execute(parseArguments(argv), dependencies);
+}
+
 /** Runs the CLI with machine-readable stdout and stderr. */
 export function main(argv = process.argv.slice(2)) {
   let command = argv[0] ?? null;
   try {
-    const parsed = parseArguments(argv);
-    command = parsed.command;
-    process.stdout.write(`${JSON.stringify(execute(parsed))}\n`);
+    const result = runMaintainerCommand(argv);
+    command = argv[0] ?? null;
+    process.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
   } catch (error) {
     process.stderr.write(
