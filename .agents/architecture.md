@@ -18,4 +18,6 @@ Remote mutation remains behind state-bound previews and explicit confirmations. 
 
 Branch push never reuses candidate remote or local transport configuration: it derives the exact GitHub HTTPS repository, uses a temporary isolated Git config populated by GitHub CLI plus a clean bare transport repository, rejects the base branch, evaluates ancestry with replacement refs and graft files disabled, validates create／fast-forward／already-applied state, and pushes the exact approved commit under an explicit expected-value lease. It prohibits plain force, unspecified leases, non-fast-forward or forced outcomes, and upstream tracking. See [ADR 0002](adr/0002-deterministic-branch-push.md).
 
+Post-release local update is a separate trust boundary. It supports only a proven global `npx-skills` symlink installation, reads an exact verified GitHub Release commit, materializes regular blobs without executing them, and atomically switches both canonical Skill content and the v3 lock. Apply is state-bound and single-attempt; interruption uses read-only reconciliation, and failed postconditions restore the exact previous Skill and lock. See [ADR 0004](adr/0004-deterministic-local-skill-update.md).
+
 A missing deterministic apply path is a hard stop, not permission to improvise a shell command.

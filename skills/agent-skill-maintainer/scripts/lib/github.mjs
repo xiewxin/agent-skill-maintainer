@@ -31,7 +31,6 @@ const ACTIONS = new Set([
   "pr_update",
   "merge",
   "release",
-  "local_update",
 ]);
 const STATE_FIELDS = Object.freeze([
   "run_id",

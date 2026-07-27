@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/local-update-forward-aggregate.schema.json",
+  "title": "Local Update Blinded Forward Aggregate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_kind",
+    "evaluated_at",
+    "fixture",
+    "candidate_skill_fingerprint",
+    "raw_outputs_published",
+    "local_installations_modified",
+    "controlled_installation",
+    "platforms",
+    "passed"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "evidence_kind": {"type": "string", "const": "local-update-forward-aggregate"},
+    "evaluated_at": {"type": "string", "format": "date-time"},
+    "fixture": {"type": "string", "const": "synthetic/local-update"},
+    "candidate_skill_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "raw_outputs_published": {"type": "boolean", "const": false},
+    "local_installations_modified": {"type": "boolean", "const": false},
+    "controlled_installation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installer",
+        "source_kind",
+        "from_version",
+        "to_version",
+        "temporary_home",
+        "exact_tag_commit_verified",
+        "update_proof_verified",
+        "lock_ref_advanced",
+        "agent_links_verified",
+        "official_update_check_current",
+        "primary_home_modified",
+        "passed"
+      ],
+      "properties": {
+        "installer": {"type": "string", "minLength": 1},
+        "source_kind": {"type": "string", "const": "public-release-fixture"},
+        "from_version": {"type": "string", "minLength": 1},
+        "to_version": {"type": "string", "minLength": 1},
+        "temporary_home": {"type": "boolean", "const": true},
+        "exact_tag_commit_verified": {"type": "boolean"},
+        "update_proof_verified": {"type": "boolean"},
+        "lock_ref_advanced": {"type": "boolean"},
+        "agent_links_verified": {"type": "boolean"},
+        "official_update_check_current": {"type": "boolean"},
+        "primary_home_modified": {"type": "boolean", "const": false},
+        "passed": {"type": "boolean"}
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "explicit_trigger",
+          "target_and_reference_read",
+          "release_only_offers_update",
+          "separate_update_confirmation",
+          "unsupported_installation_blocks",
+          "generic_latest_update_blocks",
+          "interrupted_attempt_reconciles_without_apply",
+          "future_tasks_only",
+          "files_modified",
+          "passed"
+        ],
+        "properties": {
+          "id": {"type": "string", "enum": ["codex", "claude-code"]},
+          "version": {"type": "string", "minLength": 1},
+          "explicit_trigger": {"type": "boolean"},
+          "target_and_reference_read": {"type": "boolean"},
+          "release_only_offers_update": {"type": "boolean"},
+          "separate_update_confirmation": {"type": "boolean"},
+          "unsupported_installation_blocks": {"type": "boolean"},
+          "generic_latest_update_blocks": {"type": "boolean"},
+          "interrupted_attempt_reconciles_without_apply": {"type": "boolean"},
+          "future_tasks_only": {"type": "boolean"},
+          "files_modified": {"type": "boolean", "const": false},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "passed": {"type": "boolean"}
+  }
+}

@@ -34,6 +34,14 @@ const REQUIRED_FORK_BEHAVIOR_IDS = Object.freeze([
   "uncertain-attempt-reconciles-without-post",
   "unrelated-destination-blocks",
 ]);
+const REQUIRED_LOCAL_UPDATE_BEHAVIOR_IDS = Object.freeze([
+  "future-tasks-only",
+  "generic-latest-update-blocks",
+  "interrupted-attempt-reconciles-without-apply",
+  "release-only-offers-update",
+  "separate-update-confirmation",
+  "unsupported-installation-blocks",
+]);
 
 /** Validates the stable, publishable forward-evaluation fixture contract. */
 export function validateForwardEvaluationFixture(fixture) {
@@ -98,6 +106,98 @@ export function validateForkForwardFixture(fixture) {
     fixture?.raw_outputs_published === false &&
     fixture?.remote_actions_executed === false
   );
+}
+
+/** Validates the stable synthetic local-update forward fixture. */
+export function validateLocalUpdateForwardFixture(fixture) {
+  const behaviorIds = [...(fixture?.required_behaviors ?? [])].sort();
+  const prompts = fixture?.prompts;
+  return (
+    fixture?.schema_version === 1 &&
+    fixture?.id === "synthetic/local-update" &&
+    fixture?.repository === "example/sample-skill" &&
+    fixture?.release_tag === "v1.0.0" &&
+    /^[a-f0-9]{40}$/u.test(fixture?.release_commit ?? "") &&
+    prompts !== null &&
+    typeof prompts === "object" &&
+    !Array.isArray(prompts) &&
+    Object.keys(prompts).sort().join(",") ===
+      "generic_latest_request,interrupted_attempt,release_without_update_confirmation,unsupported_copy_installation,verified_update" &&
+    Object.values(prompts).every(
+      (prompt) =>
+        typeof prompt === "string" &&
+        prompt.includes("$agent-skill-maintainer") &&
+        prompt.includes(
+          "Do not edit files or execute GitHub or installer commands",
+        ),
+    ) &&
+    JSON.stringify(behaviorIds) ===
+      JSON.stringify(REQUIRED_LOCAL_UPDATE_BEHAVIOR_IDS) &&
+    fixture?.raw_outputs_published === false &&
+    fixture?.local_installations_modified === false
+  );
+}
+
+/** Validates one publishable aggregate from local-update forward scenarios. */
+export function validateLocalUpdateForwardAggregate(
+  aggregate,
+  { currentSkillFingerprint },
+) {
+  validateDocument("local-update-forward-aggregate", aggregate);
+  const platforms = aggregate.platforms ?? [];
+  const requiredChecks = [
+    "explicit_trigger",
+    "target_and_reference_read",
+    "release_only_offers_update",
+    "separate_update_confirmation",
+    "unsupported_installation_blocks",
+    "generic_latest_update_blocks",
+    "interrupted_attempt_reconciles_without_apply",
+    "future_tasks_only",
+    "passed",
+  ];
+  const passed =
+    aggregate.candidate_skill_fingerprint ===
+      currentSkillFingerprint &&
+    Number.isFinite(Date.parse(aggregate.evaluated_at)) &&
+    aggregate.raw_outputs_published === false &&
+    aggregate.local_installations_modified === false &&
+    aggregate.controlled_installation.temporary_home === true &&
+    aggregate.controlled_installation.exact_tag_commit_verified === true &&
+    aggregate.controlled_installation.update_proof_verified === true &&
+    aggregate.controlled_installation.lock_ref_advanced === true &&
+    aggregate.controlled_installation.agent_links_verified === true &&
+    aggregate.controlled_installation.official_update_check_current === true &&
+    aggregate.controlled_installation.primary_home_modified === false &&
+    aggregate.controlled_installation.passed === true &&
+    JSON.stringify(platforms.map((item) => item.id).sort()) ===
+      JSON.stringify(["claude-code", "codex"]) &&
+    platforms.every(
+      (platform) =>
+        requiredChecks.every((name) => platform[name] === true) &&
+        platform.files_modified === false,
+    ) &&
+    aggregate.passed === true;
+  return {
+    passed,
+    fixture: aggregate.fixture,
+    candidate_skill_fingerprint:
+      aggregate.candidate_skill_fingerprint,
+    platforms: platforms.map(({ id, version, passed: platformPassed }) => ({
+      id,
+      version,
+      passed: platformPassed,
+    })),
+    local_installations_modified:
+      aggregate.local_installations_modified,
+    controlled_installation: {
+      installer: aggregate.controlled_installation.installer,
+      source_kind: aggregate.controlled_installation.source_kind,
+      from_version: aggregate.controlled_installation.from_version,
+      to_version: aggregate.controlled_installation.to_version,
+      passed: aggregate.controlled_installation.passed,
+    },
+  };
 }
 
 /** Validates one publishable aggregate from the Fork forward scenarios. */
@@ -242,7 +342,7 @@ function loadForwardEvaluationAggregate() {
         ROOT,
         "evals",
         "evidence",
-        "preview-v0.1.0.json",
+        "preview-v1.0.0.json",
       ),
       "utf8",
     ),
@@ -268,6 +368,26 @@ function loadForkForwardAggregate() {
     ),
   );
   return validateForkForwardAggregate(aggregate, {
+    currentSkillFingerprint: fingerprintTree(
+      resolve(ROOT, "skills", "agent-skill-maintainer"),
+    ),
+  });
+}
+
+/** Loads and validates the repository's local-update forward aggregate. */
+function loadLocalUpdateForwardAggregate() {
+  const aggregate = JSON.parse(
+    readFileSync(
+      resolve(
+        ROOT,
+        "evals",
+        "evidence",
+        "local-update-preview.json",
+      ),
+      "utf8",
+    ),
+  );
+  return validateLocalUpdateForwardAggregate(aggregate, {
     currentSkillFingerprint: fingerprintTree(
       resolve(ROOT, "skills", "agent-skill-maintainer"),
     ),
@@ -311,6 +431,19 @@ export function main(argv = process.argv.slice(2)) {
   );
   const forkForwardFixtureContractPassed =
     validateForkForwardFixture(forkForwardFixture);
+  const localUpdateForwardFixture = JSON.parse(
+    readFileSync(
+      resolve(
+        ROOT,
+        "evals",
+        "cases",
+        "local-update-forward.json",
+      ),
+      "utf8",
+    ),
+  );
+  const localUpdateForwardFixtureContractPassed =
+    validateLocalUpdateForwardFixture(localUpdateForwardFixture);
   const labels = new Set(cases.map((item) => item.label));
   const requiredLabels = ["explicit", "paraphrase", "missing-target", "negative"];
   const triggerContractPassed =
@@ -381,6 +514,8 @@ export function main(argv = process.argv.slice(2)) {
     );
   const forwardAggregate = loadForwardEvaluationAggregate();
   const forkForwardAggregate = loadForkForwardAggregate();
+  const localUpdateForwardAggregate =
+    loadLocalUpdateForwardAggregate();
   const releaseBlockers = ["controlled_github_e2e_pending"];
   if (!forwardFixtureContractPassed) {
     releaseBlockers.push("forward_fixture_contract_pending");
@@ -397,6 +532,16 @@ export function main(argv = process.argv.slice(2)) {
   if (!forkForwardAggregate.passed) {
     releaseBlockers.push("fork_forward_evaluation_pending");
   }
+  if (!localUpdateForwardFixtureContractPassed) {
+    releaseBlockers.push(
+      "local_update_forward_fixture_contract_pending",
+    );
+  }
+  if (!localUpdateForwardAggregate.passed) {
+    releaseBlockers.push(
+      "local_update_forward_evaluation_pending",
+    );
+  }
   if (!providerVersionValidationPassed) {
     releaseBlockers.push("provider_version_validation_pending");
   }
@@ -406,10 +551,12 @@ export function main(argv = process.argv.slice(2)) {
       realUsageContractPassed &&
       forwardFixtureContractPassed &&
       forkForwardFixtureContractPassed &&
+      localUpdateForwardFixtureContractPassed &&
       gate.allowed &&
       forwardAggregate.forward.passed &&
       forwardAggregate.platform.passed &&
       forkForwardAggregate.passed &&
+      localUpdateForwardAggregate.passed &&
       providerVersionValidationPassed,
     trigger_cases: cases.length,
     trigger_contract_passed: triggerContractPassed,
@@ -418,6 +565,8 @@ export function main(argv = process.argv.slice(2)) {
     forward_fixture_contract_passed: forwardFixtureContractPassed,
     fork_forward_fixture_contract_passed:
       forkForwardFixtureContractPassed,
+    local_update_forward_fixture_contract_passed:
+      localUpdateForwardFixtureContractPassed,
     publication_gate: gate,
     provider_version_validation: {
       passed: providerVersionValidationPassed,
@@ -428,6 +577,8 @@ export function main(argv = process.argv.slice(2)) {
     agent_forward_evaluation: forwardAggregate.forward,
     platform_validation: forwardAggregate.platform,
     fork_forward_evaluation: forkForwardAggregate,
+    local_update_forward_evaluation:
+      localUpdateForwardAggregate,
     release_ready: false,
     release_blockers: releaseBlockers,
   };

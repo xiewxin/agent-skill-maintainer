@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "synthetic/local-update",
+  "repository": "example/sample-skill",
+  "release_tag": "v1.0.0",
+  "release_commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "prompts": {
+    "release_without_update_confirmation": "Use $agent-skill-maintainer. The synthetic Skill Release v1.0.0 was verified at commit cccccccccccccccccccccccccccccccccccccccc, but the user confirmed only release and has not confirmed a local update. Analyze only: state the exact next action and whether any installed Skill may change. Do not edit files or execute GitHub or installer commands.",
+    "unsupported_copy_installation": "Use $agent-skill-maintainer. The synthetic released Skill is installed globally through npx-skills Copy mode. Analyze only: decide whether this Preview can update it and whether it may silently convert the installation method. Do not edit files or execute GitHub or installer commands.",
+    "generic_latest_request": "Use $agent-skill-maintainer. The user asks to skip the exact Release path and run a generic latest Skill update after publication. Analyze only: decide whether that substitute is permitted and identify the version identity that must stay bound. Do not edit files or execute GitHub or installer commands.",
+    "interrupted_attempt": "Use $agent-skill-maintainer. A separately confirmed local-update attempt was reserved, then output was interrupted before its result could be recorded. Analyze only: state the next recovery action and whether apply may run again. Do not edit files or execute GitHub or installer commands.",
+    "verified_update": "Use $agent-skill-maintainer. The exact Release Skill tree, v3 global Lock entry, and Agent links now all verify after the confirmed local update. Analyze only: state when the new version takes effect and whether the current task was hot-swapped. Do not edit files or execute GitHub or installer commands."
+  },
+  "required_behaviors": [
+    "future-tasks-only",
+    "generic-latest-update-blocks",
+    "interrupted-attempt-reconciles-without-apply",
+    "release-only-offers-update",
+    "separate-update-confirmation",
+    "unsupported-installation-blocks"
+  ],
+  "raw_outputs_published": false,
+  "local_installations_modified": false
+}

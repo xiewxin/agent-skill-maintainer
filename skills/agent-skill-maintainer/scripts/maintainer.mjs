@@ -25,10 +25,21 @@ import {
 } from "./lib/github.mjs";
 import { fingerprintCandidatePath } from "./lib/git.mjs";
 import {
+  applyLocalUpdate,
+  buildLocalUpdateApproval,
+  buildLocalUpdatePreview,
+  reconcileLocalUpdate,
+  validateLocalUpdatePreflight,
+} from "./lib/update.mjs";
+import {
+  authorizeLocalUpdateApply,
+  authorizeLocalUpdateReconcile,
   authorizeGithubActionReconcile,
   createRun,
   readRun,
+  recordLocalUpdateOutcome,
   recordGithubActionReconciliation,
+  reserveLocalUpdateApply,
   reserveGithubActionApply,
   transitionRun,
 } from "./lib/state.mjs";
@@ -50,6 +61,10 @@ function parseArguments(argv) {
       "github-approve",
       "github-apply",
       "github-reconcile",
+      "update-preview",
+      "update-approve",
+      "update-apply",
+      "update-reconcile",
     ].includes(command)
   ) {
     throw new Error("未知或缺少命令");
@@ -117,6 +132,32 @@ function parseArguments(argv) {
       "preview",
       "approval",
     ]),
+    "update-preview": new Set([
+      "state",
+      "binding",
+      "installed",
+    ]),
+    "update-approve": new Set([
+      "preview",
+      "confirmed-at",
+      "expires-at",
+    ]),
+    "update-apply": new Set([
+      "state-root",
+      "run-id",
+      "preview",
+      "approval",
+      "binding",
+      "installed",
+    ]),
+    "update-reconcile": new Set([
+      "state-root",
+      "run-id",
+      "preview",
+      "approval",
+      "binding",
+      "installed",
+    ]),
   }[command];
   const supplied = [
     ...Object.keys(values),
@@ -159,6 +200,9 @@ function execute(
     githubRunner,
     gitRunner,
     temporaryRoot,
+    homeDirectory,
+    stateDirectory,
+    claudeConfigDirectory,
   } = {},
 ) {
   if (command === "target") {
@@ -366,6 +410,143 @@ function execute(
         },
       );
     }
+    return result;
+  }
+  if (command === "update-preview") {
+    return buildLocalUpdatePreview(
+      readJsonFile(
+        required(values, "state"),
+        "Local update state",
+      ),
+      readJsonFile(
+        required(values, "binding"),
+        "Local update binding",
+      ),
+      required(values, "installed"),
+      {
+        homeDirectory,
+        runner: githubRunner,
+        stateDirectory,
+        claudeConfigDirectory,
+      },
+    );
+  }
+  if (command === "update-approve") {
+    return buildLocalUpdateApproval(
+      readJsonFile(
+        required(values, "preview"),
+        "Local update preview",
+      ),
+      {
+        confirmedAt: required(values, "confirmed-at"),
+        expiresAt: required(values, "expires-at"),
+      },
+    );
+  }
+  if (command === "update-apply") {
+    const preview = readJsonFile(
+      required(values, "preview"),
+      "Local update preview",
+    );
+    const approval = readJsonFile(
+      required(values, "approval"),
+      "Local update approval",
+    );
+    const binding = readJsonFile(
+      required(values, "binding"),
+      "Local update binding",
+    );
+    const stateRoot = values["state-root"] ?? DEFAULT_STATE_ROOT;
+    const runId = required(values, "run-id");
+    const installedPath = required(values, "installed");
+    authorizeLocalUpdateApply(
+      stateRoot,
+      runId,
+      preview,
+      approval,
+      {
+        providerContractHash: fingerprint(loadProviderProfiles()),
+      },
+    );
+    validateLocalUpdatePreflight(preview, approval, {
+      binding,
+      installedPath,
+      homeDirectory,
+      runner: githubRunner,
+      stateDirectory,
+      claudeConfigDirectory,
+    });
+    reserveLocalUpdateApply(
+      stateRoot,
+      runId,
+      preview,
+      approval,
+      {
+        providerContractHash: fingerprint(loadProviderProfiles()),
+      },
+    );
+    const result = applyLocalUpdate(preview, approval, {
+      binding,
+      installedPath,
+      homeDirectory,
+      runner: githubRunner,
+      stateDirectory,
+      claudeConfigDirectory,
+    });
+    recordLocalUpdateOutcome(
+      stateRoot,
+      runId,
+      preview,
+      approval,
+      result,
+      {
+        providerContractHash: fingerprint(loadProviderProfiles()),
+      },
+    );
+    return result;
+  }
+  if (command === "update-reconcile") {
+    const preview = readJsonFile(
+      required(values, "preview"),
+      "Local update preview",
+    );
+    const approval = readJsonFile(
+      required(values, "approval"),
+      "Local update approval",
+    );
+    const binding = readJsonFile(
+      required(values, "binding"),
+      "Local update binding",
+    );
+    const stateRoot = values["state-root"] ?? DEFAULT_STATE_ROOT;
+    const runId = required(values, "run-id");
+    authorizeLocalUpdateReconcile(
+      stateRoot,
+      runId,
+      preview,
+      approval,
+      {
+        providerContractHash: fingerprint(loadProviderProfiles()),
+      },
+    );
+    const result = reconcileLocalUpdate(preview, approval, {
+      binding,
+      installedPath: required(values, "installed"),
+      homeDirectory,
+      runner: githubRunner,
+      stateDirectory,
+      claudeConfigDirectory,
+    });
+    recordLocalUpdateOutcome(
+      stateRoot,
+      runId,
+      preview,
+      approval,
+      result,
+      {
+        providerContractHash: fingerprint(loadProviderProfiles()),
+      },
+    );
     return result;
   }
   throw new Error(`未知命令：${command}`);

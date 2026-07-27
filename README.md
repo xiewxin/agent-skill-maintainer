@@ -6,7 +6,7 @@ Agent Skill Maintainer reviews what actually happened in a task—not just what 
 
 [繁體中文](README.zh-TW.md)
 
-> **Preview:** local analysis, isolated candidate implementation, release gates, and separately confirmed GitHub personal Fork creation, branch push, PR, merge, and Release apply are implemented. Local Skill update and the complete live lifecycle are still being validated.
+> **Preview:** local analysis, isolated candidate implementation, release gates, separately confirmed GitHub personal Fork／branch／PR／merge／Release apply, and an exact-Release local update path for supported global `npx skills` installs are implemented. The complete live lifecycle is still being validated.
 
 ## What can it do?
 
@@ -18,6 +18,7 @@ Point it at one Skill and give it evidence from the current task, a past experie
 - **Implement without touching the installed Skill** by working only in a separately confirmed, isolated clone.
 - **Review the complete candidate** for regressions, safety, documentation impact, measurable gain, and accidental process-file or private-data leakage.
 - **Prepare and control publication** with separate previews and confirmations for personal Fork creation, branch push, PR, merge, and Release actions. Maintainers push to the verified repository; contributors reuse a verified personal Fork or create it through its own confirmed action.
+- **Update a supported installed Skill after publication** through a separate preview and confirmation, exact Release commit materialization, atomic replacement, rollback, and read-only recovery. The current task keeps using the version it loaded at startup.
 
 It is designed for maintainers improving an existing Agent Skill. It is not a general code reviewer, a new-Skill generator, or an autonomous background scanner.
 
@@ -60,7 +61,7 @@ If the evidence does not justify a change, “no improvement needed” is a vali
 | Human decision | An explicit `accepted`, `rejected`, `deferred`, or `needs_evidence` decision for every proposal |
 | Candidate implementation | A separately approved isolated clone; the installed and currently executing Skill remain unchanged |
 | Validation | Complete Diff mapping plus safety, regression, documentation, measurable-gain, privacy, and repository-hygiene checks |
-| Publication | State-bound previews, Fork／branch proofs, and separate confirmations for each supported GitHub write |
+| Publication | State-bound previews, Fork／branch／release／local-update proofs, and separate confirmations for every supported write |
 
 ## Why not just edit the Skill?
 
@@ -78,6 +79,8 @@ human decision
 isolated implementation → tests → complete Diff review
         ↓
 verified／confirmed Fork → confirmed branch push → PR → merge → release
+        ↓
+separately confirmed exact-Release local update for a future task
 ```
 
 The workflow can use compatible planning or evaluation Providers when they fill a verified capability gap, but it keeps one owner per artifact and falls back to its native process when no integration adds value.
@@ -107,7 +110,7 @@ Specify the target Skill when known. Without one, the maintainer may show only c
 ## Deterministic CLI (advanced)
 
 <details>
-<summary>Show local lifecycle and GitHub action commands</summary>
+<summary>Show local lifecycle, GitHub action, and local update commands</summary>
 
 The Preview also exposes a local deterministic CLI:
 
@@ -172,6 +175,34 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
 
 The existing-Fork and missing-Fork paths are mutually exclusive: reuse state sets `action_target.operation` to `reuse`, while create state sets it to `create`. Do not feed a failed reuse state into creation without rebuilding and previewing the exact create action.
 
+After an official publication proof exists, a supported local update uses its own preview, approval, lifecycle transition, apply, and read-only reconcile:
+
+```bash
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-preview \
+  --state update-state.json --binding binding.json \
+  --installed "$INSTALLED_SKILL" > update-preview.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-approve \
+  --preview update-preview.json \
+  --confirmed-at "$CONFIRMED_AT" \
+  --expires-at "$EXPIRES_AT" > update-approval.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs transition \
+  --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
+  --phase local_update --updates update-transition-updates.json \
+  > update-run.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-apply \
+  --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
+  --preview update-preview.json --approval update-approval.json \
+  --binding binding.json --installed "$INSTALLED_SKILL" \
+  > update-result.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
+  --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
+  --preview update-preview.json --approval update-approval.json \
+  --binding binding.json --installed "$INSTALLED_SKILL" \
+  > update-reconciliation.json
+```
+
+The first supported installation contract is a global `npx-skills` install whose canonical `.agents/skills/<skill>` directory is shared with Codex and／or Claude Code through the normal symlink layout. The standard global v3 Lock location, absolute `XDG_STATE_HOME`, and absolute `CLAUDE_CONFIG_DIR` are recognized. The binding, Lock, source repository, Skill subpath, canonical path fingerprint, installed tree, and Agent links must all agree. The update reads only the exact official Release commit, rejects source symlinks and submodules, atomically switches the canonical directory and lock entry, advances the Lock `ref` to that Release tag, and restores both on a failed postcondition. It never calls a generic “update latest” path. Project, copy, plugin, manual, and unknown installs are blocked instead of being converted to another method.
+
 Set both time variables to fresh ISO 8601 timestamps after confirmation; the expiry should be short-lived. Each transition-updates document must contain the current passed `validation_summary`, the exact `action_preview`, and its approval array; contributor branch push also includes the bound `fork_proof`. The lifecycle validates these documents before consuming the approval.
 
 `github-fork-verify` is read-only and reuses only `<active-account>/<upstream-name>` when it is writable, points to the bound upstream, and exposes the approved base commit. A missing Fork may be created with one `default_branch_only=true` request; asynchronous visibility or an uncertain response stays `pending`, and read-only reconciliation never repeats the request. The CLI tells the user to reconcile later. An explicit GitHub 4xx refusal is `blocked` with a redacted reason; a result still unresolved after five minutes is also `blocked`. Both require manual investigation rather than a blind retry.
@@ -196,6 +227,8 @@ Available and tested locally:
 - active-account, permission, base/head-commit, branch or PR, approval-expiry, active-run, replay, and argument-safety checks before every GitHub write;
 - unused-tag, Release-immutability, and post-creation commit checks for GitHub Release;
 - non-draft Release enforcement before an official publication proof can be produced;
+- separately confirmed local update for supported global `npx-skills` symlink installs, pinned to the verified Release commit with atomic Skill／Lock replacement, rollback, proof, and read-only reconciliation;
+- controlled temporary-HOME update from one public Release to the next, including Codex canonical content, Claude Code symlink, exact Lock `ref`, and the official `skills check -g` result;
 - complete previous-tag-to-candidate release-note coverage;
 - conservative Provider Profiles with a native fallback;
 - publication, repository-settings, redaction, and process-artifact checks.
@@ -203,13 +236,13 @@ Available and tested locally:
 Still being validated before it is enabled or claimed as supported:
 
 - worktree creation, organization-owned or custom-named Forks, and Fork synchronization or deletion; the current isolated path uses a local clone and contributor mode supports only the active account's personal Fork;
-- local Skill update;
+- project-scoped, copy-mode, plugin, manual, or unknown local Skill updates;
 - execution of Provider commands;
 - formal Codex or Claude Code support and the complete live GitHub lifecycle.
 
 ## Safety and privacy
 
-- Installed and currently executing Skills remain read-only.
+- Candidate analysis and implementation keep the installed and currently executing Skill read-only. Only a separately confirmed post-release local-update action may replace a supported installed copy, and it affects future tasks rather than hot-swapping the current task.
 - Conversations, Issues, files, hooks, scripts, workflows, and Skill instructions are treated as untrusted evidence.
 - Implementation requires an isolated checkout and a dedicated approval.
 - Personal Fork creation, branch push, PR creation, PR update, merge, release, local update, and cleanup require separate confirmations. Read-only verification and reuse of an existing valid Fork does not.

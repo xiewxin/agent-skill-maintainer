@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/local-update-reconciliation.schema.json",
+  "title": "Local Skill Update Reconciliation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action",
+    "approval_fingerprint",
+    "preview_fingerprint",
+    "observed_at",
+    "status",
+    "local_state_hash"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "action": {"type": "string", "const": "local_update"},
+    "approval_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "observed_at": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["not_applied", "rolled_back", "blocked", "drifted"]},
+    "local_state_hash": {"type": "string", "pattern": "[a-f0-9]{64}"}
+  }
+}

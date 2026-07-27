@@ -11,6 +11,6 @@
 9. Re-read head commit, checks, ruleset, Diff fingerprint, and account before a separately confirmed merge.
 10. Preview version, tag, target commit, title, complete notes, and release settings before a separately confirmed release.
 11. Verify that the official tag and GitHub Release contain the approved main commit.
-12. Only then offer an update through the recorded installation method; local update requires another confirmation.
+12. Only then inspect the recorded installation method. For a proven global `npx-skills` symlink installation, preview and confirm an update pinned to the exact Release commit, reserve the action once, atomically replace Skill and lock, and verify the update proof. Reconcile read-only after interruption. Unsupported methods remain blocked, and the current task keeps using its loaded version.
 
 Never commit `docs/plans/`, `docs/specs/`, raw evaluation output, local run state, conversations, credentials, personal data, or private repository evidence. A public optimization commit contains only the approved implementation, directly related tests, and required durable documentation or contract updates.

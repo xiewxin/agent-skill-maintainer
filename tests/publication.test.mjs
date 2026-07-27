@@ -22,6 +22,8 @@ import {
   validateForkForwardFixture,
   validateForwardEvaluationAggregate,
   validateForwardEvaluationFixture,
+  validateLocalUpdateForwardAggregate,
+  validateLocalUpdateForwardFixture,
 } from "../evals/run-evals.mjs";
 import {
   buildValidationResult,
@@ -499,8 +501,10 @@ test("required public files and maintainer guidance exist", () => {
     ".agents/adr/0001-node-runtime.md",
     ".agents/adr/0002-deterministic-branch-push.md",
     ".agents/adr/0003-deterministic-fork-creation.md",
+    ".agents/adr/0004-deterministic-local-skill-update.md",
     "evals/cases/sample-cleanup-forward.json",
     "evals/cases/fork-creation-forward.json",
+    "evals/cases/local-update-forward.json",
   ];
   assert.deepEqual(
     required.filter((relativePath) => {
@@ -537,6 +541,9 @@ test("README documents Preview, npx installation, and zero-dependency Node runti
     "github-preview",
     "github-reconcile",
     "github-fork-verify",
+    "update-preview",
+    "update-apply",
+    "update-reconcile",
     "fork_create",
     "branch_push",
     "--candidate",
@@ -1505,6 +1512,14 @@ test("publication, evaluation, and repository validators execute directly", () =
   assert.equal(report.platform_validation.passed, true);
   assert.equal(report.fork_forward_fixture_contract_passed, true);
   assert.equal(report.fork_forward_evaluation.passed, true);
+  assert.equal(
+    report.local_update_forward_fixture_contract_passed,
+    true,
+  );
+  assert.equal(
+    report.local_update_forward_evaluation.passed,
+    true,
+  );
   assert.deepEqual(
     report.platform_validation.platforms.map((platform) => platform.id).sort(),
     ["claude-code", "codex"],
@@ -1519,6 +1534,12 @@ test("publication, evaluation, and repository validators execute directly", () =
   );
   assert.equal(
     report.release_blockers.includes("fork_forward_evaluation_pending"),
+    false,
+  );
+  assert.equal(
+    report.release_blockers.includes(
+      "local_update_forward_evaluation_pending",
+    ),
     false,
   );
   assert.deepEqual(report.release_blockers, ["controlled_github_e2e_pending"]);
@@ -1554,7 +1575,7 @@ test("publication blocks tracked process artifacts but permits focused product f
 
 test("forward evaluation aggregate rejects self-reported count drift", () => {
   const aggregate = JSON.parse(
-    read("evals/evidence/preview-v0.1.0.json"),
+    read("evals/evidence/preview-v1.0.0.json"),
   );
   const currentSkillFingerprint = aggregate.candidate_skill_fingerprint;
   assert.equal(
@@ -1616,6 +1637,50 @@ test("Fork forward fixture and aggregate stay bound to the candidate Skill", () 
   assert.equal(
     validateForkForwardAggregate(aggregate, {
       currentSkillFingerprint: "f".repeat(64),
+    }).passed,
+    false,
+  );
+});
+
+test("local update forward fixture and aggregate stay bound to exact release behavior", () => {
+  const fixture = JSON.parse(
+    read("evals/cases/local-update-forward.json"),
+  );
+  assert.equal(validateLocalUpdateForwardFixture(fixture), true);
+  assert.equal(
+    validateLocalUpdateForwardFixture({
+      ...fixture,
+      local_installations_modified: true,
+    }),
+    false,
+  );
+
+  const aggregate = JSON.parse(
+    read("evals/evidence/local-update-preview.json"),
+  );
+  const currentSkillFingerprint =
+    aggregate.candidate_skill_fingerprint;
+  assert.equal(
+    validateLocalUpdateForwardAggregate(aggregate, {
+      currentSkillFingerprint,
+    }).passed,
+    true,
+  );
+  assert.equal(
+    validateLocalUpdateForwardAggregate(aggregate, {
+      currentSkillFingerprint: "f".repeat(64),
+    }).passed,
+    false,
+  );
+  assert.equal(
+    validateLocalUpdateForwardAggregate({
+      ...aggregate,
+      controlled_installation: {
+        ...aggregate.controlled_installation,
+        official_update_check_current: false,
+      },
+    }, {
+      currentSkillFingerprint,
     }).passed,
     false,
   );

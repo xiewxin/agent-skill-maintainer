@@ -31,6 +31,7 @@ import {
 } from "./core.mjs";
 import { verifyReleaseNoteCoverageProof } from "./git.mjs";
 import { verifyGithubActionApproval } from "./github.mjs";
+import { verifyLocalUpdateApproval } from "./update.mjs";
 
 export class InvalidStateTransition extends Error {
   /** Indicates an illegal lifecycle transition. */
@@ -115,7 +116,7 @@ const NEXT_PHASES = Object.freeze({
   ]),
   merge: new Set(["merge", "release", "completed"]),
   release: new Set(["release", "local_update", "completed"]),
-  local_update: new Set(["completed"]),
+  local_update: new Set(["local_update", "completed"]),
 });
 const LEGACY_PHASES = Object.freeze({
   targeting: "target_selection",
@@ -270,7 +271,7 @@ function migrateRunDocument(document) {
   if (!Number.isInteger(document.schema_version)) {
     throw new Error("run state schema_version 不合法");
   }
-  if (document.schema_version === 6) {
+  if (document.schema_version === 7) {
     return {
       document: clone(document),
       migrated: false,
@@ -278,7 +279,9 @@ function migrateRunDocument(document) {
   }
   let current;
   let migrated = true;
-  if (document.schema_version === 5) {
+  if (document.schema_version === 6) {
+    current = clone(document);
+  } else if (document.schema_version === 5) {
     current = clone(document);
   } else if (document.schema_version === 4) {
     current = clone(document);
@@ -343,10 +346,22 @@ function migrateRunDocument(document) {
   ) {
     throw new Error(
       "舊版 active run 已進入遠端副作用階段但缺少 branch push proof；" +
-        "請使用原版本完成 reconcile，或建立新 run",
+      "請使用原版本完成 reconcile，或建立新 run",
     );
   }
-  current.schema_version = 6;
+  if (
+    current.status === "active" &&
+    current.phase === "local_update"
+  ) {
+    throw new Error(
+      "舊版 active run 的 local_update 缺少新版獨立審批與嘗試證據；" +
+        "請使用原版本完成，或建立新 run",
+    );
+  }
+  current.attempted_local_update_fingerprints ??= [];
+  current.local_update_attempts ??= [];
+  current.local_update_reconciliations ??= [];
+  current.schema_version = 7;
   return {
     document: current,
     migrated,
@@ -364,7 +379,7 @@ export function createRun(
     throw new Error(`run 已存在：${runId}`);
   }
   const document = {
-    schema_version: 6,
+    schema_version: 7,
     run_id: runId,
     binding_id: safeBindingId,
     phase: "target_selection",
@@ -375,6 +390,9 @@ export function createRun(
     attempted_github_action_fingerprints: [],
     github_action_attempts: [],
     github_action_reconciliations: [],
+    attempted_local_update_fingerprints: [],
+    local_update_attempts: [],
+    local_update_reconciliations: [],
   };
   validateDocument("run-state", document);
   atomicWriteJson(path, document);
@@ -414,6 +432,9 @@ export function readRun(stateRoot, runId) {
     ) {
       throw new Error("fork_create attempt 缺少綁定的執行資訊");
     }
+  }
+  for (const reconciliation of document.local_update_reconciliations) {
+    validateDocument("local-update-reconciliation", reconciliation);
   }
   if (migrated) {
     atomicWriteJson(path, document);
@@ -648,6 +669,281 @@ export function recordGithubActionReconciliation(
   });
 }
 
+/** Validates one local update action against its active run. */
+function validateLocalUpdateRunBinding(
+  document,
+  preview,
+  approval,
+  {
+    providerContractHash,
+    now = new Date(),
+    attempted,
+  },
+) {
+  if (document.status !== "active") {
+    throw new InvalidStateTransition(
+      "terminal run 不可執行 Local update",
+    );
+  }
+  verifyLocalUpdateApproval(approval, preview, {
+    now,
+    requireFresh: attempted !== true,
+  });
+  if (document.phase !== "local_update") {
+    throw new InvalidStateTransition(
+      "Local update 與目前 run phase 不一致",
+    );
+  }
+  if (
+    preview.state.run_id !== document.run_id ||
+    preview.state.binding_id !== document.binding_id ||
+    preview.state.skill !== document.target?.skill ||
+    preview.state.repository !== document.target?.repository
+  ) {
+    throw new InvalidStateTransition(
+      "Local update 與目前 run identity 不一致",
+    );
+  }
+  if (
+    typeof providerContractHash !== "string" ||
+    preview.state.provider_contract_hash !== providerContractHash
+  ) {
+    throw new InvalidStateTransition("Provider contract 已漂移");
+  }
+  if (
+    !document.consumed_approval_fingerprints.includes(
+      approval.fingerprint,
+    )
+  ) {
+    throw new InvalidStateTransition(
+      "Local update approval 尚未由 lifecycle 預先消費",
+    );
+  }
+  const wasAttempted =
+    document.attempted_local_update_fingerprints.includes(
+      approval.fingerprint,
+    );
+  if (attempted !== wasAttempted) {
+    if (attempted) {
+      throw new InvalidStateTransition(
+        "Local update 尚未記錄嘗試，不可 reconcile",
+      );
+    }
+    throw new InvalidStateTransition(
+      "Local update approval 已嘗試執行，不可重放",
+    );
+  }
+  validateRunCandidate(document);
+  validateDocument("publication-proof", document.publication_proof);
+  if (
+    preview.state.to_version !== document.publication_proof.version ||
+    preview.state.release_tag !== document.publication_proof.tag ||
+    preview.state.source_commit !== document.publication_proof.commit ||
+    preview.state.repository !== document.publication_proof.repository
+  ) {
+    throw new InvalidStateTransition(
+      "Local update 與官方發布證明不一致",
+    );
+  }
+  return true;
+}
+
+/** Authorizes a local update without recording an attempt. */
+export function authorizeLocalUpdateApply(
+  stateRoot,
+  runId,
+  preview,
+  approval,
+  { providerContractHash, now = new Date() } = {},
+) {
+  const root = resolve(stateRoot);
+  const initial = readRun(root, runId);
+  return withBindingLock(root, initial.binding_id, () => {
+    const document = readRun(root, runId);
+    validateLocalUpdateRunBinding(document, preview, approval, {
+      providerContractHash,
+      now,
+      attempted: false,
+    });
+    return clone(document);
+  });
+}
+
+/** Reserves one authorized local update before any installation write. */
+export function reserveLocalUpdateApply(
+  stateRoot,
+  runId,
+  preview,
+  approval,
+  { providerContractHash, now = new Date() } = {},
+) {
+  const root = resolve(stateRoot);
+  const initial = readRun(root, runId);
+  return withBindingLock(root, initial.binding_id, () => {
+    const document = readRun(root, runId);
+    validateLocalUpdateRunBinding(document, preview, approval, {
+      providerContractHash,
+      now,
+      attempted: false,
+    });
+    const attemptedAt = now instanceof Date
+      ? now.toISOString()
+      : new Date(now).toISOString();
+    if (!Number.isFinite(Date.parse(attemptedAt))) {
+      throw new InvalidStateTransition(
+        "Local update attempt 時間不合法",
+      );
+    }
+    document.attempted_local_update_fingerprints.push(
+      approval.fingerprint,
+    );
+    document.local_update_attempts.push({
+      approval_fingerprint: approval.fingerprint,
+      preview_fingerprint: preview.fingerprint,
+      attempted_at: attemptedAt,
+      canonical_path_fingerprint:
+        preview.state.canonical_path_fingerprint,
+    });
+    validateDocument("run-state", document);
+    atomicWriteJson(runPath(root, runId), document);
+    return clone(document);
+  });
+}
+
+/** Authorizes a read-only local update reconciliation. */
+export function authorizeLocalUpdateReconcile(
+  stateRoot,
+  runId,
+  preview,
+  approval,
+  { providerContractHash } = {},
+) {
+  const root = resolve(stateRoot);
+  const initial = readRun(root, runId);
+  return withBindingLock(root, initial.binding_id, () => {
+    const document = readRun(root, runId);
+    validateLocalUpdateRunBinding(document, preview, approval, {
+      providerContractHash,
+      now: approval.confirmed_at,
+      attempted: true,
+    });
+    return clone(document);
+  });
+}
+
+/** Records one verified local update proof or reconciliation. */
+export function recordLocalUpdateOutcome(
+  stateRoot,
+  runId,
+  preview,
+  approval,
+  outcome,
+  { providerContractHash } = {},
+) {
+  const root = resolve(stateRoot);
+  const initial = readRun(root, runId);
+  return withBindingLock(root, initial.binding_id, () => {
+    const document = readRun(root, runId);
+    validateLocalUpdateRunBinding(document, preview, approval, {
+      providerContractHash,
+      now: approval.confirmed_at,
+      attempted: true,
+    });
+    if (!isObject(outcome)) {
+      throw new InvalidStateTransition(
+        "Local update outcome 必須是 object",
+      );
+    }
+    if (isObject(outcome.proof)) {
+      validateDocument("update-proof", outcome.proof);
+      if (
+        outcome.proof.run_id !== document.run_id ||
+        outcome.proof.binding_id !== document.binding_id ||
+        outcome.proof.skill !== document.target?.skill ||
+        outcome.proof.repository !== document.target?.repository ||
+        outcome.proof.from_version !== preview.state.from_version ||
+        outcome.proof.to_version !==
+          document.publication_proof.version ||
+        outcome.proof.release_tag !==
+          document.publication_proof.tag ||
+        outcome.proof.source_commit !==
+          document.publication_proof.commit ||
+        outcome.proof.install_method !==
+          preview.state.install_method ||
+        outcome.proof.scope !== preview.state.scope ||
+        outcome.proof.mode !== preview.state.mode ||
+        outcome.proof.canonical_path_fingerprint !==
+          preview.state.canonical_path_fingerprint ||
+        outcome.proof.previous_fingerprint !==
+          preview.state.current_fingerprint ||
+        outcome.proof.verified !== true
+      ) {
+        throw new InvalidStateTransition(
+          "Local update proof 與目前 run 不一致",
+        );
+      }
+      if (
+        isObject(document.update_proof) &&
+        canonicalJson(document.update_proof) !==
+          canonicalJson(outcome.proof)
+      ) {
+        throw new InvalidStateTransition(
+          "Local update proof 已存在且內容不同",
+        );
+      }
+      document.update_proof = clone(outcome.proof);
+    } else if (isObject(outcome.reconciliation)) {
+      validateDocument(
+        "local-update-reconciliation",
+        outcome.reconciliation,
+      );
+      if (
+        outcome.reconciliation.approval_fingerprint !==
+          approval.fingerprint ||
+        outcome.reconciliation.preview_fingerprint !==
+          preview.fingerprint
+      ) {
+        throw new InvalidStateTransition(
+          "Local update reconciliation 與目前 action 不一致",
+        );
+      }
+      const existing = document.local_update_reconciliations.find(
+        (item) =>
+          item.approval_fingerprint === approval.fingerprint &&
+          canonicalJson(item) ===
+            canonicalJson(outcome.reconciliation),
+      );
+      if (existing !== undefined) {
+        return clone(document);
+      }
+      const latest = document.local_update_reconciliations
+        .filter(
+          (item) =>
+            item.approval_fingerprint === approval.fingerprint,
+        )
+        .at(-1);
+      if (
+        latest !== undefined &&
+        ["blocked", "drifted"].includes(latest.status)
+      ) {
+        throw new InvalidStateTransition(
+          "Local update reconciliation 已進入終止狀態",
+        );
+      }
+      document.local_update_reconciliations.push(
+        clone(outcome.reconciliation),
+      );
+    } else {
+      throw new InvalidStateTransition(
+        "Local update outcome 缺少 proof 或 reconciliation",
+      );
+    }
+    validateDocument("run-state", document);
+    atomicWriteJson(runPath(root, runId), document);
+    return clone(document);
+  });
+}
+
 /** Creates the persistent implementation lease for a binding. */
 function claimImplementationLease(stateRoot, bindingId, runId) {
   const path = bindingPath(stateRoot, bindingId, "leases", "json");
@@ -823,6 +1119,31 @@ function requireActionApproval(
         canonicalJson(document.repository_snapshot.process_artifact_prefixes)
     ) {
       throw new InvalidStateTransition("implementation 確認與目前倉庫狀態不一致");
+    }
+    return approval;
+  }
+  if (action === "local_update") {
+    if (!isObject(document.action_preview)) {
+      throw new InvalidStateTransition("缺少 local_update 動作預覽");
+    }
+    verifyLocalUpdateApproval(
+      approval,
+      document.action_preview,
+      { now: new Date() },
+    );
+    if (
+      approval.run_id !== document.run_id ||
+      approval.binding_id !== document.binding_id ||
+      approval.skill !== document.target?.skill ||
+      approval.repository !== document.target?.repository ||
+      (
+        expectedHeadCommit !== null &&
+        approval.source_commit !== expectedHeadCommit
+      )
+    ) {
+      throw new InvalidStateTransition(
+        "local_update 確認與目前發布狀態不一致",
+      );
     }
     return approval;
   }
@@ -1084,17 +1405,47 @@ function requirePhaseEvidence(document, nextPhase) {
       throw new InvalidStateTransition("尚未驗證官方發布");
     }
     requireActionApproval(document, "local_update", {
-      expectedBaseBranch: document.merge_proof.default_branch,
       expectedHeadCommit: document.publication_proof.commit,
-      expectedDiffHash: document.candidate_snapshot.candidate_diff_hash,
     });
-    const updateTarget = currentActionTarget(document, "local_update");
     if (
-      updateTarget.skill !== document.target?.skill ||
-      updateTarget.version !== document.publication_proof.version
+      document.action_preview.state.skill !== document.target?.skill ||
+      document.action_preview.state.repository !==
+        document.target?.repository ||
+      document.action_preview.state.to_version !==
+        document.publication_proof.version ||
+      document.action_preview.state.release_tag !==
+        document.publication_proof.tag ||
+      document.action_preview.state.source_commit !==
+        document.publication_proof.commit
     ) {
       throw new InvalidStateTransition(
         "Local update 目標與官方發布證明不一致",
+      );
+    }
+  }
+  if (nextPhase === "completed" && document.phase === "local_update") {
+    if (!isObject(document.update_proof)) {
+      throw new InvalidStateTransition(
+        "Local update 尚未產生 update-proof",
+      );
+    }
+    validateDocument("update-proof", document.update_proof);
+    if (
+      document.update_proof.verified !== true ||
+      document.update_proof.run_id !== document.run_id ||
+      document.update_proof.binding_id !== document.binding_id ||
+      document.update_proof.skill !== document.target?.skill ||
+      document.update_proof.repository !==
+        document.target?.repository ||
+      document.update_proof.to_version !==
+        document.publication_proof?.version ||
+      document.update_proof.release_tag !==
+        document.publication_proof?.tag ||
+      document.update_proof.source_commit !==
+        document.publication_proof?.commit
+    ) {
+      throw new InvalidStateTransition(
+        "Local update proof 與目前發布狀態不一致",
       );
     }
   }
@@ -1174,6 +1525,25 @@ export function transitionRun(
         ) {
           throw new InvalidStateTransition(
             `${retryAction} 上次嘗試尚未證明未寫入，不可重試`,
+          );
+        }
+      }
+      if (
+        nextPhase === "local_update" &&
+        document.phase === "local_update"
+      ) {
+        const latestAttempt = document.local_update_attempts.at(-1);
+        if (
+          latestAttempt !== undefined &&
+          !document.local_update_reconciliations.some(
+            (item) =>
+              item.approval_fingerprint ===
+                latestAttempt.approval_fingerprint &&
+              ["not_applied", "rolled_back"].includes(item.status),
+          )
+        ) {
+          throw new InvalidStateTransition(
+            "local_update 上次嘗試尚未證明未套用或已回滾，不可重試",
           );
         }
       }

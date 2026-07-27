@@ -35,6 +35,7 @@ const REQUIRED_FILES = Object.freeze([
   ".agents/adr/0001-node-runtime.md",
   ".agents/adr/0002-deterministic-branch-push.md",
   ".agents/adr/0003-deterministic-fork-creation.md",
+  ".agents/adr/0004-deterministic-local-skill-update.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/skill-feedback.yml",
   ".github/ISSUE_TEMPLATE/bug.yml",
@@ -42,15 +43,23 @@ const REQUIRED_FILES = Object.freeze([
   ".github/workflows/validation.yml",
   "evals/cases/sample-cleanup-forward.json",
   "evals/cases/fork-creation-forward.json",
-  "evals/evidence/preview-v0.1.0.json",
+  "evals/cases/local-update-forward.json",
+  "evals/evidence/preview-v1.0.0.json",
   "evals/evidence/fork-creation-preview.json",
+  "evals/evidence/local-update-preview.json",
   "skills/agent-skill-maintainer/assets/schemas/blinded-forward-aggregate.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/branch-push-proof.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/fork-proof.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/fork-forward-aggregate.schema.json",
+  "skills/agent-skill-maintainer/assets/schemas/local-update-approval.schema.json",
+  "skills/agent-skill-maintainer/assets/schemas/local-update-forward-aggregate.schema.json",
+  "skills/agent-skill-maintainer/assets/schemas/local-update-preview.schema.json",
+  "skills/agent-skill-maintainer/assets/schemas/local-update-reconciliation.schema.json",
+  "skills/agent-skill-maintainer/assets/schemas/update-proof.schema.json",
   "skills/agent-skill-maintainer/SKILL.md",
   "skills/agent-skill-maintainer/agents/openai.yaml",
   "skills/agent-skill-maintainer/scripts/maintainer.mjs",
+  "skills/agent-skill-maintainer/scripts/lib/update.mjs",
 ]);
 const EXCLUDED_PARTS = new Set([
   ".git",
@@ -265,16 +274,21 @@ export function validatePublication() {
   } catch (error) {
     errors.push(`invalid package.json: ${error.message}`);
   }
-  try {
-    const aggregate = JSON.parse(
-      readFileSync(
-        resolve(ROOT, "evals", "evidence", "preview-v0.1.0.json"),
-        "utf8",
-      ),
-    );
-    validateDocument("blinded-forward-aggregate", aggregate);
-  } catch (error) {
-    errors.push(`invalid forward evaluation aggregate: ${error.message}`);
+  for (const [schema, relativePath] of [
+    ["blinded-forward-aggregate", "evals/evidence/preview-v1.0.0.json"],
+    ["fork-forward-aggregate", "evals/evidence/fork-creation-preview.json"],
+    ["local-update-forward-aggregate", "evals/evidence/local-update-preview.json"],
+  ]) {
+    try {
+      const aggregate = JSON.parse(
+        readFileSync(resolve(ROOT, relativePath), "utf8"),
+      );
+      validateDocument(schema, aggregate);
+    } catch (error) {
+      errors.push(
+        `invalid forward evaluation aggregate: ${relativePath}: ${error.message}`,
+      );
+    }
   }
 
   for (const file of publicTextFiles()) {
