@@ -18,7 +18,9 @@ import {
   applyGithubAction,
   buildGithubActionApproval,
   buildGithubActionPreview,
+  inspectGithubActionState,
   reconcileGithubAction,
+  verifyExistingFork,
   validateBranchPushLocalState,
 } from "./lib/github.mjs";
 import { fingerprintCandidatePath } from "./lib/git.mjs";
@@ -44,6 +46,7 @@ function parseArguments(argv) {
       "transition",
       "validate",
       "github-preview",
+      "github-fork-verify",
       "github-approve",
       "github-apply",
       "github-reconcile",
@@ -95,6 +98,7 @@ function parseArguments(argv) {
     ]),
     validate: new Set(["schema", "input"]),
     "github-preview": new Set(["action", "state", "candidate"]),
+    "github-fork-verify": new Set(["state"]),
     "github-approve": new Set([
       "preview",
       "confirmed-at",
@@ -234,6 +238,15 @@ function execute(
       state,
     );
   }
+  if (command === "github-fork-verify") {
+    return verifyExistingFork(
+      readJsonFile(
+        required(values, "state"),
+        "GitHub Fork verification state",
+      ),
+      { runner: githubRunner },
+    );
+  }
   if (command === "github-approve") {
     return buildGithubActionApproval(
       readJsonFile(required(values, "preview"), "GitHub action preview"),
@@ -266,6 +279,11 @@ function execute(
     } else if (values.candidate !== undefined) {
       throw new Error("--candidate 只適用於 branch_push");
     }
+    if (preview.action === "fork_create") {
+      inspectGithubActionState(preview, {
+        runner: githubRunner,
+      });
+    }
     const reserved = reserveGithubActionApply(
       stateRoot,
       runId,
@@ -278,7 +296,7 @@ function execute(
     const documentationImpact = reserved.validation_summary?.checks?.find(
       (check) => check?.category === "documentation",
     )?.details ?? null;
-    return applyGithubAction(preview, approval, {
+    const result = applyGithubAction(preview, approval, {
       candidatePath,
       candidateSnapshot: reserved.candidate_snapshot,
       documentationImpact,
@@ -286,6 +304,19 @@ function execute(
       gitRunner,
       temporaryRoot,
     });
+    if (result.reconciliation !== undefined) {
+      recordGithubActionReconciliation(
+        stateRoot,
+        runId,
+        preview,
+        approval,
+        result.reconciliation,
+        {
+          providerContractHash: fingerprint(loadProviderProfiles()),
+        },
+      );
+    }
+    return result;
   }
   if (command === "github-reconcile") {
     const preview = readJsonFile(
@@ -308,20 +339,28 @@ function execute(
     const documentationImpact = active.validation_summary?.checks?.find(
       (check) => check?.category === "documentation",
     )?.details ?? null;
+    const attempt = active.github_action_attempts
+      .filter(
+        (item) =>
+          item.action === preview.action &&
+          item.approval_fingerprint === approval.fingerprint,
+      )
+      .at(-1);
     const result = reconcileGithubAction(preview, {
       documentationImpact,
       approvalFingerprint: approval.fingerprint,
+      attemptedAt: attempt?.attempted_at,
       runner: githubRunner,
       gitRunner,
       temporaryRoot,
     });
-    if (result.status === "not_applied") {
+    if (result.reconciliation !== undefined) {
       recordGithubActionReconciliation(
         values["state-root"] ?? DEFAULT_STATE_ROOT,
         required(values, "run-id"),
         preview,
         approval,
-        result.absence_proof,
+        result.reconciliation,
         {
           providerContractHash: fingerprint(loadProviderProfiles()),
         },

@@ -26,6 +26,14 @@ const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
   "publication-defect",
   "stable-feedback-and-optimization-ids",
 ]);
+const REQUIRED_FORK_BEHAVIOR_IDS = Object.freeze([
+  "confirmed-create-exactly-one-post",
+  "missing-fork-requires-preview-and-confirmation",
+  "organization-destination-blocks",
+  "separate-later-action-confirmations",
+  "uncertain-attempt-reconciles-without-post",
+  "unrelated-destination-blocks",
+]);
 
 /** Validates the stable, publishable forward-evaluation fixture contract. */
 export function validateForwardEvaluationFixture(fixture) {
@@ -59,6 +67,83 @@ export function validateForwardEvaluationFixture(fixture) {
     negative?.files_modified === false &&
     fixture?.raw_outputs_published === false
   );
+}
+
+/** Validates the stable synthetic personal-Fork forward fixture. */
+export function validateForkForwardFixture(fixture) {
+  const behaviorIds = [...(fixture?.required_behaviors ?? [])].sort();
+  const prompts = fixture?.prompts;
+  return (
+    fixture?.schema_version === 1 &&
+    fixture?.id === "synthetic/fork-creation" &&
+    fixture?.upstream_repository ===
+      "example-upstream/sample-skill" &&
+    fixture?.active_account === "example-user" &&
+    fixture?.personal_fork === "example-user/sample-skill" &&
+    fixture?.base_branch === "main" &&
+    /^[a-f0-9]{40}$/u.test(fixture?.base_commit ?? "") &&
+    prompts !== null &&
+    typeof prompts === "object" &&
+    !Array.isArray(prompts) &&
+    Object.keys(prompts).sort().join(",") ===
+      "confirmed_create,later_actions,missing_fork,organization_destination,uncertain_attempt,unrelated_destination" &&
+    Object.values(prompts).every(
+      (prompt) =>
+        typeof prompt === "string" &&
+        prompt.includes("$agent-skill-maintainer") &&
+        prompt.includes("Do not edit files or execute GitHub commands"),
+    ) &&
+    JSON.stringify(behaviorIds) ===
+      JSON.stringify(REQUIRED_FORK_BEHAVIOR_IDS) &&
+    fixture?.raw_outputs_published === false &&
+    fixture?.remote_actions_executed === false
+  );
+}
+
+/** Validates one publishable aggregate from the Fork forward scenarios. */
+export function validateForkForwardAggregate(
+  aggregate,
+  { currentSkillFingerprint },
+) {
+  validateDocument("fork-forward-aggregate", aggregate);
+  const platforms = aggregate.platforms ?? [];
+  const requiredChecks = [
+    "explicit_trigger",
+    "target_and_reference_read",
+    "confirmed_create_exactly_one_post",
+    "missing_fork_requires_preview_and_confirmation",
+    "organization_destination_blocks",
+    "unrelated_destination_blocks",
+    "uncertain_attempt_reconciles_without_post",
+    "separate_later_action_confirmations",
+    "passed",
+  ];
+  const passed =
+    aggregate.candidate_skill_fingerprint ===
+      currentSkillFingerprint &&
+    Number.isFinite(Date.parse(aggregate.evaluated_at)) &&
+    aggregate.raw_outputs_published === false &&
+    aggregate.remote_actions_executed === false &&
+    JSON.stringify(platforms.map((item) => item.id).sort()) ===
+      JSON.stringify(["claude-code", "codex"]) &&
+    platforms.every(
+      (platform) =>
+        requiredChecks.every((name) => platform[name] === true) &&
+        platform.files_modified === false,
+    ) &&
+    aggregate.passed === true;
+  return {
+    passed,
+    fixture: aggregate.fixture,
+    candidate_skill_fingerprint:
+      aggregate.candidate_skill_fingerprint,
+    platforms: platforms.map(({ id, version, passed: platformPassed }) => ({
+      id,
+      version,
+      passed: platformPassed,
+    })),
+    remote_actions_executed: aggregate.remote_actions_executed,
+  };
 }
 
 /** Validates one publishable blinded forward-evaluation aggregate. */
@@ -169,6 +254,26 @@ function loadForwardEvaluationAggregate() {
   });
 }
 
+/** Loads and validates the repository's personal-Fork forward aggregate. */
+function loadForkForwardAggregate() {
+  const aggregate = JSON.parse(
+    readFileSync(
+      resolve(
+        ROOT,
+        "evals",
+        "evidence",
+        "fork-creation-preview.json",
+      ),
+      "utf8",
+    ),
+  );
+  return validateForkForwardAggregate(aggregate, {
+    currentSkillFingerprint: fingerprintTree(
+      resolve(ROOT, "skills", "agent-skill-maintainer"),
+    ),
+  });
+}
+
 /** Runs the selected evaluation suite. */
 export function main(argv = process.argv.slice(2)) {
   const suiteIndex = argv.indexOf("--suite");
@@ -193,6 +298,19 @@ export function main(argv = process.argv.slice(2)) {
   );
   const forwardFixtureContractPassed =
     validateForwardEvaluationFixture(forwardFixture);
+  const forkForwardFixture = JSON.parse(
+    readFileSync(
+      resolve(
+        ROOT,
+        "evals",
+        "cases",
+        "fork-creation-forward.json",
+      ),
+      "utf8",
+    ),
+  );
+  const forkForwardFixtureContractPassed =
+    validateForkForwardFixture(forkForwardFixture);
   const labels = new Set(cases.map((item) => item.label));
   const requiredLabels = ["explicit", "paraphrase", "missing-target", "negative"];
   const triggerContractPassed =
@@ -262,6 +380,7 @@ export function main(argv = process.argv.slice(2)) {
         Number.isFinite(Date.parse(profile.last_verified_at)),
     );
   const forwardAggregate = loadForwardEvaluationAggregate();
+  const forkForwardAggregate = loadForkForwardAggregate();
   const releaseBlockers = ["controlled_github_e2e_pending"];
   if (!forwardFixtureContractPassed) {
     releaseBlockers.push("forward_fixture_contract_pending");
@@ -272,6 +391,12 @@ export function main(argv = process.argv.slice(2)) {
   if (!forwardAggregate.platform.passed) {
     releaseBlockers.push("platform_validation_pending");
   }
+  if (!forkForwardFixtureContractPassed) {
+    releaseBlockers.push("fork_forward_fixture_contract_pending");
+  }
+  if (!forkForwardAggregate.passed) {
+    releaseBlockers.push("fork_forward_evaluation_pending");
+  }
   if (!providerVersionValidationPassed) {
     releaseBlockers.push("provider_version_validation_pending");
   }
@@ -280,15 +405,19 @@ export function main(argv = process.argv.slice(2)) {
       triggerContractPassed &&
       realUsageContractPassed &&
       forwardFixtureContractPassed &&
+      forkForwardFixtureContractPassed &&
       gate.allowed &&
       forwardAggregate.forward.passed &&
       forwardAggregate.platform.passed &&
+      forkForwardAggregate.passed &&
       providerVersionValidationPassed,
     trigger_cases: cases.length,
     trigger_contract_passed: triggerContractPassed,
     redacted_real_usage_cases: 1,
     real_usage_contract_passed: realUsageContractPassed,
     forward_fixture_contract_passed: forwardFixtureContractPassed,
+    fork_forward_fixture_contract_passed:
+      forkForwardFixtureContractPassed,
     publication_gate: gate,
     provider_version_validation: {
       passed: providerVersionValidationPassed,
@@ -298,6 +427,7 @@ export function main(argv = process.argv.slice(2)) {
     },
     agent_forward_evaluation: forwardAggregate.forward,
     platform_validation: forwardAggregate.platform,
+    fork_forward_evaluation: forkForwardAggregate,
     release_ready: false,
     release_blockers: releaseBlockers,
   };

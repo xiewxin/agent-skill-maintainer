@@ -30,6 +30,8 @@ export const SCHEMA_NAMES = Object.freeze([
   "provider-selection",
   "repository-snapshot",
   "candidate-snapshot",
+  "fork-proof",
+  "fork-forward-aggregate",
   "branch-push-proof",
   "validation",
   "pr-proof",
@@ -1333,6 +1335,39 @@ export function validateBranchPushProofContract(
     proof.previous_remote_commit !== proof.commit
   ) {
     throw new Error("Branch verify proof 的遠端提交不一致");
+  }
+  return proof;
+}
+
+/** Validates a Fork proof against the active contribute target. */
+export function validateForkProofContract(
+  forkProof,
+  {
+    repository,
+    forkRepository,
+    account,
+    baseBranch,
+    baseCommit,
+  },
+) {
+  if (!isObject(forkProof)) {
+    throw new Error("Fork proof 必須是 object");
+  }
+  const proof = clone(forkProof);
+  validateDocument("fork-proof", proof);
+  if (
+    proof.repository !== repository ||
+    proof.fork_repository !== forkRepository ||
+    proof.account !== account ||
+    proof.relationship !== "contribute" ||
+    proof.base_branch !== baseBranch ||
+    proof.base_commit !== baseCommit ||
+    proof.parent_repository !== repository ||
+    proof.default_branch_only !== true ||
+    proof.base_commit_available !== true ||
+    proof.verified !== true
+  ) {
+    throw new Error("Fork proof 與目前帳號、上游或基準提交不一致");
   }
   return proof;
 }

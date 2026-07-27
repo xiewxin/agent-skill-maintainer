@@ -7,7 +7,7 @@
   "required": ["schema_version", "action", "preview_fingerprint", "run_id", "binding_id", "account", "repository", "relationship", "base_branch", "base_commit", "head_branch", "head_commit", "diff_hash", "action_target_hash", "release_enabled", "provider_contract_hash", "confirmed_at", "expires_at", "fingerprint"],
   "properties": {
     "schema_version": {"type": "integer", "const": 1},
-    "action": {"type": "string", "enum": ["branch_push", "pr_create", "pr_update", "merge", "release", "local_update"]},
+    "action": {"type": "string", "enum": ["fork_create", "branch_push", "pr_create", "pr_update", "merge", "release", "local_update"]},
     "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
     "run_id": {"type": "string", "minLength": 1},
     "binding_id": {"type": "string", "minLength": 1},

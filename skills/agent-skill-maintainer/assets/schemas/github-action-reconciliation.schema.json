@@ -16,12 +16,12 @@
   ],
   "properties": {
     "schema_version": {"type": "integer", "const": 1},
-    "action": {"type": "string", "enum": ["branch_push", "pr_create", "pr_update", "merge", "release"]},
+    "action": {"type": "string", "enum": ["fork_create", "branch_push", "pr_create", "pr_update", "merge", "release"]},
     "repository": {"type": "string", "minLength": 1},
     "approval_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
     "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
     "observed_at": {"type": "string", "format": "date-time"},
-    "status": {"type": "string", "const": "not_applied"},
+    "status": {"type": "string", "enum": ["not_applied", "pending", "blocked", "drifted"]},
     "remote_state_hash": {"type": "string", "pattern": "[a-f0-9]{64}"}
   }
 }

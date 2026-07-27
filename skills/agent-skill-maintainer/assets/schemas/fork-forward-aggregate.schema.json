@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/fork-forward-aggregate.schema.json",
+  "title": "Fork Creation Blinded Forward Aggregate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_kind",
+    "evaluated_at",
+    "fixture",
+    "candidate_skill_fingerprint",
+    "raw_outputs_published",
+    "remote_actions_executed",
+    "platforms",
+    "passed"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "evidence_kind": {"type": "string", "const": "fork-forward-aggregate"},
+    "evaluated_at": {"type": "string", "format": "date-time"},
+    "fixture": {"type": "string", "const": "synthetic/fork-creation"},
+    "candidate_skill_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "raw_outputs_published": {"type": "boolean", "const": false},
+    "remote_actions_executed": {"type": "boolean", "const": false},
+    "platforms": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "explicit_trigger",
+          "target_and_reference_read",
+          "confirmed_create_exactly_one_post",
+          "missing_fork_requires_preview_and_confirmation",
+          "organization_destination_blocks",
+          "unrelated_destination_blocks",
+          "uncertain_attempt_reconciles_without_post",
+          "separate_later_action_confirmations",
+          "files_modified",
+          "passed"
+        ],
+        "properties": {
+          "id": {"type": "string", "enum": ["codex", "claude-code"]},
+          "version": {"type": "string", "minLength": 1},
+          "explicit_trigger": {"type": "boolean"},
+          "target_and_reference_read": {"type": "boolean"},
+          "confirmed_create_exactly_one_post": {"type": "boolean"},
+          "missing_fork_requires_preview_and_confirmation": {"type": "boolean"},
+          "organization_destination_blocks": {"type": "boolean"},
+          "unrelated_destination_blocks": {"type": "boolean"},
+          "uncertain_attempt_reconciles_without_post": {"type": "boolean"},
+          "separate_later_action_confirmations": {"type": "boolean"},
+          "files_modified": {"type": "boolean", "const": false},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "passed": {"type": "boolean"}
+  }
+}
