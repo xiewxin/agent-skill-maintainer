@@ -19,6 +19,9 @@ import {
   buildGithubActionPreview,
 } from "../skills/agent-skill-maintainer/scripts/lib/github.mjs";
 import {
+  buildLocalUpdateApproval,
+} from "../skills/agent-skill-maintainer/scripts/lib/update.mjs";
+import {
   evaluateReleaseNoteCoverage,
 } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 import {
@@ -27,7 +30,9 @@ import {
   LockUnavailableError,
   createRun,
   readRun,
+  recordLocalUpdateOutcome,
   recordGithubActionReconciliation,
+  reserveLocalUpdateApply,
   reserveGithubActionApply,
   transitionRun,
   withBindingLock,
@@ -171,6 +176,8 @@ const FORK_PROOF = Object.freeze({
   verified: true,
 });
 
+const MERGE_COMMIT = "8".repeat(40);
+
 const RELEASE_COVERAGE = Object.freeze(
   evaluateReleaseNoteCoverage(
     {
@@ -178,10 +185,10 @@ const RELEASE_COVERAGE = Object.freeze(
       previous_ref: "v0.9.0",
       previous_commit: "base123",
       candidate_ref: "HEAD",
-      candidate_commit: "merge123",
+      candidate_commit: MERGE_COMMIT,
       commits: [
         {
-          commit: "merge123",
+          commit: MERGE_COMMIT,
           subject: "feat: workflow improvement (#1)",
           pull_requests: [1],
         },
@@ -193,7 +200,7 @@ const RELEASE_COVERAGE = Object.freeze(
         {
           id: "NOTE-001",
           disposition: "included",
-          source_commits: ["merge123"],
+          source_commits: [MERGE_COMMIT],
           source_prs: [1],
           optimization_ids: ["OPT-001"],
           note: "Publishes the workflow improvement.",
@@ -204,6 +211,7 @@ const RELEASE_COVERAGE = Object.freeze(
     },
   ),
 );
+const LOCAL_PROVIDER_HASH = "9".repeat(64);
 
 /** Returns one exact Preview and expiring confirmation for a lifecycle action. */
 function actionEvidence(
@@ -260,6 +268,76 @@ function actionEvidence(
   return { action_preview: preview, approvals: [approval] };
 }
 
+/** Returns one exact local update Preview and expiring confirmation. */
+function localUpdateEvidence() {
+  const preview = {
+    schema_version: 1,
+    action: "local_update",
+    state: {
+      run_id: "run-001",
+      binding_id: "binding-001",
+      skill: "example-skill",
+      repository: "example/skill",
+      relationship: "managed",
+      from_version: "v0.9.0",
+      to_version: "v1.0.0",
+      release_tag: "v1.0.0",
+      source_commit: MERGE_COMMIT,
+      install_method: "npx-skills",
+      scope: "global",
+      mode: "symlink",
+      source_url: "https://github.com/example/skill.git",
+      skill_path: "skills/example-skill/SKILL.md",
+      agents: ["claude-code", "codex"],
+      lock_schema_version: 3,
+      canonical_path_fingerprint: "a".repeat(64),
+      current_fingerprint: "b".repeat(64),
+      target_tree_sha: "c".repeat(40),
+      current_ref: "v0.9.0",
+      target_ref: "v1.0.0",
+      lock_entry_hash: "d".repeat(64),
+      agent_links_hash: "e".repeat(64),
+      provider_contract_hash: LOCAL_PROVIDER_HASH,
+    },
+  };
+  preview.fingerprint = fingerprint(preview);
+  const confirmedAt = new Date(Date.now() - 60_000);
+  const approval = buildLocalUpdateApproval(preview, {
+    confirmedAt: confirmedAt.toISOString(),
+    expiresAt: new Date(
+      confirmedAt.getTime() + 15 * 60 * 1000,
+    ).toISOString(),
+  });
+  return { action_preview: preview, approvals: [approval] };
+}
+
+/** Returns a verified proof matching localUpdateEvidence. */
+function localUpdateProof() {
+  return {
+    schema_version: 2,
+    run_id: "run-001",
+    binding_id: "binding-001",
+    skill: "example-skill",
+    repository: "example/skill",
+    from_version: "v0.9.0",
+    to_version: "v1.0.0",
+    release_tag: "v1.0.0",
+    source_commit: MERGE_COMMIT,
+    install_method: "npx-skills",
+    scope: "global",
+    mode: "symlink",
+    canonical_path_fingerprint: "a".repeat(64),
+    previous_fingerprint: "b".repeat(64),
+    installed_fingerprint: "f".repeat(64),
+    lock_entry_hash: "1".repeat(64),
+    agent_links_hash: "e".repeat(64),
+    operation: "update",
+    activation: "future_tasks_only",
+    verified_at: new Date().toISOString(),
+    verified: true,
+  };
+}
+
 /** Runs one state test with an isolated root. */
 function withStateRoot(operation) {
   const root = mkdtempSync(join(tmpdir(), "maintainer-state-"));
@@ -277,7 +355,7 @@ test("run state is minimal, versioned, and recoverable", () => {
       bindingId: "binding-001",
       target: { skill: "example-skill", repository: "example/skill" },
     });
-    assert.equal(created.schema_version, 6);
+    assert.equal(created.schema_version, 7);
     assert.equal(created.phase, "target_selection");
     assert.deepEqual(readRun(root, "run-001"), created);
     assert.doesNotMatch(JSON.stringify(created), /raw_transcript|secret/u);
@@ -373,12 +451,12 @@ test("full managed lifecycle includes PR update and local update", () => {
             schema_version: 1,
             repository: "example/skill",
             pr_number: 1,
-            merge_commit: "merge123",
+            merge_commit: MERGE_COMMIT,
             default_branch: "main",
           },
           release_coverage: RELEASE_COVERAGE,
           ...actionEvidence("release", {
-            headCommit: "merge123",
+            headCommit: MERGE_COMMIT,
             actionTarget: {
               version: "v1.0.0",
               title: "Agent Skill Maintainer v1.0.0",
@@ -390,34 +468,78 @@ test("full managed lifecycle includes PR update and local update", () => {
           }),
         },
       ],
-      [
-        "local_update",
-        {
-          publication_proof: {
-            schema_version: 1,
-            repository: "example/skill",
-            version: "v1.0.0",
-            tag: "v1.0.0",
-            commit: "merge123",
-            release_url: "https://github.com/example/skill/releases/tag/v1.0.0",
-            official: true,
-          },
-          ...actionEvidence("local_update", {
-            headCommit: "merge123",
-            actionTarget: {
-              skill: "example-skill",
-              version: "v1.0.0",
-            },
-          }),
-        },
-      ],
-      ["completed", {}],
     ];
     let document;
     for (const [phase, updates] of phases) {
       document = transitionRun(root, "run-001", phase, { updates });
       assert.equal(document.phase, phase);
     }
+    const updateEvidence = localUpdateEvidence();
+    document = transitionRun(root, "run-001", "local_update", {
+      updates: {
+        publication_proof: {
+          schema_version: 1,
+          repository: "example/skill",
+          version: "v1.0.0",
+          tag: "v1.0.0",
+          commit: MERGE_COMMIT,
+          release_url: "https://github.com/example/skill/releases/tag/v1.0.0",
+          official: true,
+        },
+        ...updateEvidence,
+      },
+    });
+    assert.equal(document.phase, "local_update");
+    assert.throws(
+      () => transitionRun(root, "run-001", "completed"),
+      /update-proof/u,
+    );
+    const approval = updateEvidence.approvals[0];
+    reserveLocalUpdateApply(
+      root,
+      "run-001",
+      updateEvidence.action_preview,
+      approval,
+      { providerContractHash: LOCAL_PROVIDER_HASH },
+    );
+    assert.throws(
+      () =>
+        reserveLocalUpdateApply(
+          root,
+          "run-001",
+          updateEvidence.action_preview,
+          approval,
+          { providerContractHash: LOCAL_PROVIDER_HASH },
+        ),
+      /不可重放/u,
+    );
+    assert.throws(
+      () =>
+        recordLocalUpdateOutcome(
+          root,
+          "run-001",
+          updateEvidence.action_preview,
+          approval,
+          {
+            proof: {
+              ...localUpdateProof(),
+              previous_fingerprint: "9".repeat(64),
+            },
+          },
+          { providerContractHash: LOCAL_PROVIDER_HASH },
+        ),
+      /目前 run 不一致/u,
+    );
+    recordLocalUpdateOutcome(
+      root,
+      "run-001",
+      updateEvidence.action_preview,
+      approval,
+      { proof: localUpdateProof() },
+      { providerContractHash: LOCAL_PROVIDER_HASH },
+    );
+    document = transitionRun(root, "run-001", "completed");
+    assert.equal(document.phase, "completed");
     assert.equal(document.status, "completed");
   });
 });
@@ -795,13 +917,13 @@ test("legacy terminal run migrates before current schema validation", () => {
       "utf8",
     );
     const migrated = readRun(root, "run-001");
-    assert.equal(migrated.schema_version, 6);
+    assert.equal(migrated.schema_version, 7);
     assert.equal(migrated.phase, "completed");
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), migrated);
   });
 });
 
-test("v5 run migrates to v6 without inventing Fork evidence", () => {
+test("v5 run migrates to v7 without inventing remote evidence", () => {
   withStateRoot((root) => {
     const path = join(root, "runs", "run-001", "state.json");
     mkdirSync(dirname(path), { recursive: true });
@@ -823,9 +945,41 @@ test("v5 run migrates to v6 without inventing Fork evidence", () => {
       "utf8",
     );
     const migrated = readRun(root, "run-001");
-    assert.equal(migrated.schema_version, 6);
+    assert.equal(migrated.schema_version, 7);
     assert.equal(migrated.fork_proof, undefined);
     assert.deepEqual(migrated.github_action_attempts, []);
+    assert.deepEqual(migrated.local_update_attempts, []);
+  });
+});
+
+test("legacy active local update cannot inherit the new approval contract", () => {
+  withStateRoot((root) => {
+    const path = join(root, "runs", "run-001", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        schema_version: 6,
+        run_id: "run-001",
+        binding_id: "binding-001",
+        phase: "local_update",
+        status: "active",
+        target: {
+          skill: "example-skill",
+          repository: "example/skill",
+        },
+        approvals: [],
+        consumed_approval_fingerprints: [],
+        attempted_github_action_fingerprints: [],
+        github_action_attempts: [],
+        github_action_reconciliations: [],
+      })}\n`,
+      "utf8",
+    );
+    assert.throws(
+      () => readRun(root, "run-001"),
+      /缺少新版獨立審批/u,
+    );
   });
 });
 
@@ -1222,11 +1376,11 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
       schema_version: 1,
       repository: "example/skill",
       pr_number: 1,
-      merge_commit: "merge123",
+      merge_commit: MERGE_COMMIT,
       default_branch: "main",
     };
     const releaseEvidence = actionEvidence("release", {
-      headCommit: "merge123",
+      headCommit: MERGE_COMMIT,
       actionTarget: {
         version: "v1.0.0",
         title: "Agent Skill Maintainer v1.0.0",
@@ -1263,7 +1417,7 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
       repository: "example/skill",
       version: "v1.0.0",
       tag: "v1.0.0",
-      commit: "merge123",
+      commit: MERGE_COMMIT,
       release_url: "https://github.com/example/skill/releases/tag/v1.0.0",
       official: true,
     };
@@ -1278,13 +1432,7 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
               release_url:
                 "https://github.com/evil/other/releases/tag/not-the-release",
             },
-            ...actionEvidence("local_update", {
-              headCommit: "merge123",
-              actionTarget: {
-                skill: "example-skill",
-                version: "v1.0.0",
-              },
-            }),
+            ...localUpdateEvidence(),
           },
         }),
       /尚未驗證官方發布/u,

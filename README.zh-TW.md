@@ -6,7 +6,7 @@ Agent Skill Maintainer 檢視任務中實際發生的事情，而不只相信 Sk
 
 [English](README.md)
 
-> **Preview：** 本機分析、隔離候選實作、發布 gate，以及分別確認的 GitHub 個人 Fork 建立、branch push／PR／合併／Release apply 已完成實作。本機 Skill 更新與完整真實生命週期仍在驗證中。
+> **Preview：** 本機分析、隔離候選實作、發布 gate、分別確認的 GitHub 個人 Fork／branch／PR／合併／Release apply，以及支援的全局 `npx skills` 安裝之精確 Release 本機更新路徑已完成實作。完整真實生命週期仍在驗證中。
 
 ## 它能做什麼
 
@@ -18,6 +18,7 @@ Agent Skill Maintainer 檢視任務中實際發生的事情，而不只相信 Sk
 - **不碰已安裝版本也能實作**：只有在獨立確認後，才於隔離 clone 修改。
 - **完整檢查候選版本**：驗證回歸、安全、文件影響、可量測增益，以及過程檔或私密資料是否意外混入。
 - **控制發布風險**：個人 Fork 建立、branch push、PR、合併與 Release 都有獨立預覽及確認；管理者推到已驗證倉庫，貢獻者可複用已驗證個人 Fork，或透過獨立確認的動作建立。
+- **正式發布後更新支援的本機 Skill**：使用獨立預覽與確認、精確 Release commit、原子切換、失敗回滾及唯讀恢復；目前任務仍使用啟動時載入的版本。
 
 它適合維護既有 Agent Skill；不是一般程式碼審查工具、全新 Skill 產生器，也不會在背景自動掃描所有 Skill。
 
@@ -60,7 +61,7 @@ OPT-001 優先依倉庫／使用者語言選擇，再使用 fallback。
 | 人工決策 | 每個候選都有 `accepted`、`rejected`、`deferred` 或 `needs_evidence` 結論 |
 | 候選實作 | 經獨立確認的隔離 clone；已安裝及目前執行中的 Skill 保持不變 |
 | 完整驗證 | Diff 映射，以及安全、回歸、文件、可量測增益、隱私與倉庫衛生檢查 |
-| 發布控制 | 綁定狀態的預覽、Fork／branch proof，以及每個支援的 GitHub 寫入動作各自確認 |
+| 發布控制 | 綁定狀態的預覽、Fork／branch／Release／本機更新 proof，以及每個支援寫入動作各自確認 |
 
 ## 為什麼不直接修改 Skill
 
@@ -78,6 +79,8 @@ Agent Skill Maintainer 補上的是完整維護閉環：
 隔離實作 → 測試 → 完整 Diff 審查
         ↓
 驗證／確認 Fork → 確認 branch push → PR → 合併 → 發布
+        ↓
+另行確認精確 Release 本機更新，供後續新任務使用
 ```
 
 若相容的計畫或評測 Provider 能補上已驗證的能力缺口，工作流可以使用它們；每份正式產物仍只有一個 owner。沒有實際增益時，會維持原生流程。
@@ -107,7 +110,7 @@ npx skills add https://github.com/xiewxin/agent-skill-maintainer.git \
 ## 確定性 CLI（進階）
 
 <details>
-<summary>展開本機生命週期與 GitHub 動作命令</summary>
+<summary>展開本機生命週期、GitHub 動作與本機更新命令</summary>
 
 Preview 也提供本機確定性 CLI：
 
@@ -172,6 +175,34 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
 
 既有 Fork 與缺少 Fork 是互斥路徑：reuse state 的 `action_target.operation` 必須是 `reuse`，create state 則是 `create`。reuse 驗證失敗後，不得直接把同一份 state 當成建立動作；必須重建並預覽精確的 create action。
 
+正式發布 proof 已存在後，支援的本機更新也使用獨立預覽、approval、生命週期 transition、apply 與唯讀 reconcile：
+
+```bash
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-preview \
+  --state update-state.json --binding binding.json \
+  --installed "$INSTALLED_SKILL" > update-preview.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-approve \
+  --preview update-preview.json \
+  --confirmed-at "$CONFIRMED_AT" \
+  --expires-at "$EXPIRES_AT" > update-approval.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs transition \
+  --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
+  --phase local_update --updates update-transition-updates.json \
+  > update-run.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-apply \
+  --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
+  --preview update-preview.json --approval update-approval.json \
+  --binding binding.json --installed "$INSTALLED_SKILL" \
+  > update-result.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
+  --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
+  --preview update-preview.json --approval update-approval.json \
+  --binding binding.json --installed "$INSTALLED_SKILL" \
+  > update-reconciliation.json
+```
+
+第一版只支援全局 `npx-skills` 安裝：規範 `.agents/skills/<skill>` 目錄透過正常符號連結供 Codex 與／或 Claude Code 共用。可辨識標準全局 v3 Lock 位置、絕對 `XDG_STATE_HOME` 及絕對 `CLAUDE_CONFIG_DIR`。binding、Lock、來源倉庫、Skill 子路徑、規範路徑指紋、已安裝樹及 Agent 連結必須全部一致。更新只讀取正式 Release 的精確 commit，拒絕來源符號連結與 Submodule，以原子方式切換規範目錄及 Lock，並把 Lock `ref` 推進到該 Release Tag；後置條件失敗時還原兩者，不會呼叫追蹤 latest 的通用更新。專案級、Copy、Plugin、手動及未知安裝會明確阻擋，不轉換成其他方法。
+
 請在確認後把兩個時間變數設為新的 ISO 8601 時間，且有效期限應保持短暫。每份 transition updates 文件都必須包含目前已通過的 `validation_summary`、精確的 `action_preview` 及其 approval 陣列；貢獻者 branch push 還要帶入綁定的 `fork_proof`。生命週期會先驗證這些文件，再消費 approval。
 
 `github-fork-verify` 是唯讀動作；只有 `<active-account>/<upstream-name>` 可寫、parent 指向綁定 upstream，且包含核准 base commit 時才會複用。Fork 不存在時，可透過一個 `default_branch_only=true` 請求建立；非同步可見性或不確定回應會維持 `pending`，唯讀 reconcile 不會重送請求，CLI 也會提示稍後核對。GitHub 明確回傳 4xx 時會以脫敏原因標記 `blocked`；嘗試五分鐘後仍無法確認也會成為 `blocked`。兩者都必須人工調查，不能盲目重試。
@@ -196,6 +227,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
 - 每次 GitHub 寫入前檢查 active account、權限、base／head commit、branch／PR、approval 到期時間、active run、重放與參數安全；
 - GitHub Release 另檢查 tag 尚未使用、Release immutability 及建立後 commit；
 - 只有非 draft Release 才能產生正式發布 proof；
+- 支援的全局 `npx-skills` 符號連結安裝可在獨立確認後，固定到已驗證 Release commit 進行 Skill／Lock 原子切換、回滾、proof 與唯讀 reconcile；
+- 已在受控臨時 HOME 完成兩個公開 Release 間的更新，並核對 Codex 規範內容、Claude Code 符號連結、精確 Lock `ref` 及官方 `skills check -g` 結果；
 - 從上一個 tag 到候選提交的完整 Release 說明覆蓋對帳；
 - 具原生 fallback 的保守 Provider Profile；
 - 公開發行、倉庫設定、遮罩及過程檔檢查。
@@ -203,13 +236,13 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
 仍在驗證，尚未啟用或宣稱正式支援：
 
 - worktree 建立、組織擁有或自訂名稱的 Fork，以及 Fork 同步或刪除；目前隔離路徑使用本機 clone，貢獻模式只支援 active account 的個人 Fork；
-- 本機 Skill 更新；
+- 專案級、Copy 模式、Plugin、手動或未知安裝方式的本機 Skill 更新；
 - Provider 命令執行；
 - Codex／Claude Code 正式支援及完整真實 GitHub 生命週期。
 
 ## 安全與隱私
 
-- 已安裝及目前執行中的 Skill 永遠唯讀。
+- 候選分析與實作期間，已安裝及目前執行中的 Skill 保持唯讀。只有正式發布後另行確認的本機更新動作，才可替換受支援的已安裝副本；它只影響後續新任務，不會熱切換目前任務。
 - 對話、Issue、檔案、hook、腳本、workflow 與 Skill 指令都先視為未信任證據。
 - 實作必須使用隔離 checkout 與專用核准。
 - 個人 Fork 建立、branch push、PR 建立、PR 更新、合併、發布、本機更新與清理分別確認；唯讀驗證及複用既有有效 Fork 不需寫入確認。

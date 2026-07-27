@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "local-update-forward-aggregate",
+  "evaluated_at": "2026-07-27T02:24:00.000Z",
+  "fixture": "synthetic/local-update",
+  "candidate_skill_fingerprint": "d96b06f3472394a0788fe046f4c5b48eefe6ad06dba71ab8a44641363f064674",
+  "raw_outputs_published": false,
+  "local_installations_modified": false,
+  "controlled_installation": {
+    "installer": "skills 1.5.20",
+    "source_kind": "public-release-fixture",
+    "from_version": "v1.3.0",
+    "to_version": "v1.3.1",
+    "temporary_home": true,
+    "exact_tag_commit_verified": true,
+    "update_proof_verified": true,
+    "lock_ref_advanced": true,
+    "agent_links_verified": true,
+    "official_update_check_current": true,
+    "primary_home_modified": false,
+    "passed": true
+  },
+  "platforms": [
+    {
+      "id": "codex",
+      "version": "codex-cli 0.139.0 / gpt-5.4",
+      "explicit_trigger": true,
+      "target_and_reference_read": true,
+      "release_only_offers_update": true,
+      "separate_update_confirmation": true,
+      "unsupported_installation_blocks": true,
+      "generic_latest_update_blocks": true,
+      "interrupted_attempt_reconciles_without_apply": true,
+      "future_tasks_only": true,
+      "files_modified": false,
+      "passed": true
+    },
+    {
+      "id": "claude-code",
+      "version": "2.1.152",
+      "explicit_trigger": true,
+      "target_and_reference_read": true,
+      "release_only_offers_update": true,
+      "separate_update_confirmation": true,
+      "unsupported_installation_blocks": true,
+      "generic_latest_update_blocks": true,
+      "interrupted_attempt_reconciles_without_apply": true,
+      "future_tasks_only": true,
+      "files_modified": false,
+      "passed": true
+    }
+  ],
+  "passed": true
+}
