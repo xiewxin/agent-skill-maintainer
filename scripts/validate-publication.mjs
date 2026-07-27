@@ -12,11 +12,15 @@ import { spawnSync } from "node:child_process";
 import { extname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  FORMAL_PROVIDER_IDS,
+  LEGACY_PROVIDER_IDS,
   PROVIDER_IDS,
   SCHEMA_NAMES,
   loadProviderProfiles,
   validateDocument,
+  validateProviderValidationAggregate,
 } from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
+import { fingerprintTree } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
@@ -36,6 +40,7 @@ const REQUIRED_FILES = Object.freeze([
   ".agents/adr/0002-deterministic-branch-push.md",
   ".agents/adr/0003-deterministic-fork-creation.md",
   ".agents/adr/0004-deterministic-local-skill-update.md",
+  ".agents/adr/0005-stable-provider-validation.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/skill-feedback.yml",
   ".github/ISSUE_TEMPLATE/bug.yml",
@@ -47,6 +52,7 @@ const REQUIRED_FILES = Object.freeze([
   "evals/evidence/preview-v1.0.0.json",
   "evals/evidence/fork-creation-preview.json",
   "evals/evidence/local-update-preview.json",
+  "evals/evidence/provider-validation-v1.0.0.json",
   "skills/agent-skill-maintainer/assets/schemas/blinded-forward-aggregate.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/branch-push-proof.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/fork-proof.schema.json",
@@ -55,6 +61,7 @@ const REQUIRED_FILES = Object.freeze([
   "skills/agent-skill-maintainer/assets/schemas/local-update-forward-aggregate.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/local-update-preview.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/local-update-reconciliation.schema.json",
+  "skills/agent-skill-maintainer/assets/schemas/provider-validation-aggregate.schema.json",
   "skills/agent-skill-maintainer/assets/schemas/update-proof.schema.json",
   "skills/agent-skill-maintainer/SKILL.md",
   "skills/agent-skill-maintainer/agents/openai.yaml",
@@ -227,6 +234,51 @@ export function validateStructuredAssets(skillRoot = SKILL_ROOT) {
       errors.push(`Provider Profile command policy must default deny: ${providerId}`);
     }
   }
+  const formalIds = Object.values(profiles)
+    .filter((profile) => profile.role_type === "formal")
+    .map((profile) => profile.provider_id)
+    .sort();
+  const legacyIds = Object.values(profiles)
+    .filter((profile) => profile.role_type === "legacy")
+    .map((profile) => profile.provider_id)
+    .sort();
+  if (
+    JSON.stringify(formalIds) !==
+    JSON.stringify([...FORMAL_PROVIDER_IDS].sort())
+  ) {
+    errors.push("formal Provider Profile catalog is not exact");
+  }
+  if (
+    JSON.stringify(legacyIds) !==
+    JSON.stringify([...LEGACY_PROVIDER_IDS].sort())
+  ) {
+    errors.push("legacy Provider Profile catalog is not exact");
+  }
+  if (
+    profiles.gsd?.verification_evidence?.[0]?.repository_status !==
+      "archived" ||
+    profiles.gsd?.command_policy?.allowed_when_verified?.length !== 0
+  ) {
+    errors.push("legacy GSD must stay archived and command-disabled");
+  }
+  for (const providerId of FORMAL_PROVIDER_IDS) {
+    const profile = profiles[providerId];
+    if (
+      profile?.tested_versions?.length !== 1 ||
+      profile?.verification_evidence?.length !== 1 ||
+      !/^[a-f0-9]{40}$/u.test(
+        profile?.verification_evidence?.[0]?.release_commit ?? "",
+      ) ||
+      profile?.verification_evidence?.[0]?.scope !== "commands" ||
+      profile?.command_policy?.allowed_when_verified?.length === 0 ||
+      JSON.stringify([...profile.supported_platforms].sort()) !==
+        JSON.stringify(["claude-code", "codex"])
+    ) {
+      errors.push(
+        `formal Provider Profile lacks stable command evidence: ${providerId}`,
+      );
+    }
+  }
   return errors;
 }
 
@@ -278,6 +330,7 @@ export function validatePublication() {
     ["blinded-forward-aggregate", "evals/evidence/preview-v1.0.0.json"],
     ["fork-forward-aggregate", "evals/evidence/fork-creation-preview.json"],
     ["local-update-forward-aggregate", "evals/evidence/local-update-preview.json"],
+    ["provider-validation-aggregate", "evals/evidence/provider-validation-v1.0.0.json"],
   ]) {
     try {
       const aggregate = JSON.parse(
@@ -289,6 +342,24 @@ export function validatePublication() {
         `invalid forward evaluation aggregate: ${relativePath}: ${error.message}`,
       );
     }
+  }
+  try {
+    const aggregate = JSON.parse(
+      readFileSync(
+        resolve(ROOT, "evals", "evidence", "provider-validation-v1.0.0.json"),
+        "utf8",
+      ),
+    );
+    const result = validateProviderValidationAggregate(aggregate, {
+      currentSkillFingerprint: fingerprintTree(SKILL_ROOT),
+    });
+    if (!result.passed) {
+      errors.push(
+        `stable Provider validation is not ready: ${result.blockers.join(", ")}`,
+      );
+    }
+  } catch (error) {
+    errors.push(`invalid stable Provider validation: ${error.message}`);
   }
 
   for (const file of publicTextFiles()) {

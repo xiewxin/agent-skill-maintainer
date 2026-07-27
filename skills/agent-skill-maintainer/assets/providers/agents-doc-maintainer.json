@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "profile_schema_version": 1,
+  "schema_version": 2,
+  "profile_schema_version": 2,
   "provider_id": "agents-doc-maintainer",
   "role_type": "auxiliary",
   "version_detection": {

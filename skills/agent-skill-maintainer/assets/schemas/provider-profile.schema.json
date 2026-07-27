@@ -6,10 +6,10 @@
   "additionalProperties": false,
   "required": ["schema_version", "profile_schema_version", "provider_id", "role_type", "version_detection", "tested_versions", "last_verified_at", "verification_evidence", "supported_platforms", "capabilities", "artifact_contracts", "command_policy", "fallback", "blocking"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
-    "profile_schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
+    "profile_schema_version": {"type": "integer", "const": 2},
     "provider_id": {"type": "string", "minLength": 1},
-    "role_type": {"type": "string", "enum": ["formal", "auxiliary"]},
+    "role_type": {"type": "string", "enum": ["formal", "auxiliary", "legacy"]},
     "version_detection": {"type": "object"},
     "tested_versions": {"type": "array", "items": {"type": "string"}},
     "last_verified_at": {"type": ["string", "null"]},
@@ -18,12 +18,13 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["version", "repository", "repository_status", "release_url", "scope", "artifacts"],
+        "required": ["version", "repository", "repository_status", "release_url", "release_commit", "scope", "artifacts"],
         "properties": {
           "version": {"type": "string", "minLength": 1},
           "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
           "repository_status": {"type": "string", "enum": ["active", "archived"]},
           "release_url": {"type": "string", "pattern": "https://github\\.com/.+"},
+          "release_commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
           "scope": {"type": "string", "enum": ["artifact-contract-read-only", "commands"]},
           "artifacts": {
             "type": "array",
@@ -36,7 +37,18 @@
     "supported_platforms": {"type": "array", "items": {"type": "string"}},
     "capabilities": {"type": "array", "items": {"type": "string"}},
     "artifact_contracts": {"type": "array", "items": {"type": "object"}},
-    "command_policy": {"type": "object"},
+    "command_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "allowed_when_verified"],
+      "properties": {
+        "default": {"type": "string", "const": "deny"},
+        "allowed_when_verified": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
     "fallback": {"type": "object"},
     "blocking": {"type": "object"},
     "unsupported_versions": {"type": "array", "items": {"type": "string"}}

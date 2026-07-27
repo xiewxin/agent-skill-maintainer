@@ -27,6 +27,7 @@ export const SCHEMA_NAMES = Object.freeze([
   "optimization",
   "approval",
   "provider-profile",
+  "provider-validation-aggregate",
   "provider-selection",
   "repository-snapshot",
   "candidate-snapshot",
@@ -53,10 +54,19 @@ export const PROVIDER_IDS = Object.freeze([
   "spec-kit",
   "openspec",
   "bmad",
+  "matt-pocock-skills",
   "gsd",
   "skill-creator",
   "agents-doc-maintainer",
 ]);
+export const FORMAL_PROVIDER_IDS = Object.freeze([
+  "superpowers",
+  "spec-kit",
+  "openspec",
+  "bmad",
+  "matt-pocock-skills",
+]);
+export const LEGACY_PROVIDER_IDS = Object.freeze(["gsd"]);
 
 const SCHEMA_ROOT = fileURLToPath(
   new URL("../../assets/schemas/", import.meta.url),
@@ -589,14 +599,14 @@ export function loadProviderProfiles(profileRoot = PROVIDER_PROFILE_ROOT) {
         `Provider Profile 缺少欄位：${providerId}: ${missing.join(", ")}`,
       );
     }
-    if (profile.profile_schema_version !== 1 || profile.schema_version !== 1) {
+    if (profile.profile_schema_version !== 2 || profile.schema_version !== 2) {
       throw new Error(`Provider Profile 版本不支援：${providerId}`);
     }
     if (profile.provider_id !== providerId) {
       throw new Error(`Provider Profile ID 與檔名不一致：${providerId}`);
     }
     validateDocument("provider-profile", profile);
-    if (!["formal", "auxiliary"].includes(profile.role_type)) {
+    if (!["formal", "auxiliary", "legacy"].includes(profile.role_type)) {
       throw new Error(`Provider role_type 不合法：${providerId}`);
     }
     for (const name of [
@@ -670,11 +680,21 @@ export function resolveProviderSupport(profile, { detectedVersion }) {
       commands_allowed: false,
     };
   }
+  if (profile.role_type === "legacy") {
+    return {
+      status: "compatible-read-only",
+      commands_allowed: false,
+      allowed_commands: [],
+    };
+  }
   const commands = profile.command_policy?.allowed_when_verified ?? [];
+  const evidence = profile.verification_evidence
+    .find((item) => item.version === detectedVersion);
+  const commandsVerified = evidence?.scope === "commands";
   return {
     status: "verified",
-    commands_allowed: commands.length > 0,
-    allowed_commands: clone(commands),
+    commands_allowed: commandsVerified && commands.length > 0,
+    allowed_commands: commandsVerified ? clone(commands) : [],
   };
 }
 
@@ -765,6 +785,11 @@ export function selectProviders(
       supportStatus === "compatible-read-only" &&
       requiredAccess !== "read-only"
     ) {
+      item.inactive_reason = "commands_not_verified";
+      inactive.push(item);
+      continue;
+    }
+    if (requiredAccess === "commands" && support.commands_allowed !== true) {
       item.inactive_reason = "commands_not_verified";
       inactive.push(item);
       continue;
@@ -1112,6 +1137,220 @@ export function publicationGate({
       thresholds: { ...thresholds },
       supported_platforms: { ...supportedPlatforms },
     },
+  };
+}
+
+/** Validates the redacted five-Provider aggregate for a stable candidate. */
+export function validateProviderValidationAggregate(
+  aggregate,
+  {
+    currentSkillFingerprint,
+    profiles = loadProviderProfiles(),
+  },
+) {
+  validateDocument("provider-validation-aggregate", aggregate);
+  const blockers = [];
+  const addBlocker = (reason) => {
+    if (!blockers.includes(reason)) {
+      blockers.push(reason);
+    }
+  };
+  if (aggregate.candidate_skill_fingerprint !== currentSkillFingerprint) {
+    addBlocker("candidate_fingerprint_mismatch");
+  }
+  if (!Number.isFinite(Date.parse(aggregate.evaluated_at))) {
+    addBlocker("provider_evaluation_time_invalid");
+  }
+  if (
+    aggregate.raw_outputs_published !== false ||
+    aggregate.local_installations_modified !== false
+  ) {
+    addBlocker("provider_publication_boundary_failed");
+  }
+
+  const caseIds = aggregate.cases.map((item) => item.provider_id);
+  for (const providerId of FORMAL_PROVIDER_IDS) {
+    const matches = caseIds.filter((item) => item === providerId).length;
+    if (matches === 0) {
+      addBlocker("missing_provider_case");
+    }
+    if (matches > 1) {
+      addBlocker("duplicate_provider_case");
+    }
+  }
+  if (caseIds.some((providerId) => !FORMAL_PROVIDER_IDS.includes(providerId))) {
+    addBlocker("unexpected_provider_case");
+  }
+  if (new Set(caseIds).size !== caseIds.length) {
+    addBlocker("duplicate_provider_case");
+  }
+
+  const owners = [];
+  for (const item of aggregate.cases) {
+    const profile = profiles[item.provider_id];
+    if (!isObject(profile) || profile.role_type !== "formal") {
+      addBlocker("provider_profile_not_formal");
+      continue;
+    }
+    const evidence = profile.verification_evidence
+      .find((candidate) => candidate.version === item.provider_version);
+    if (
+      !profile.tested_versions.includes(item.provider_version) ||
+      !evidence
+    ) {
+      addBlocker("provider_version_mismatch");
+    } else {
+      if (evidence.release_commit !== item.release_commit) {
+        addBlocker("provider_commit_mismatch");
+      }
+      if (evidence.scope !== "commands") {
+        addBlocker("provider_commands_not_verified");
+      }
+    }
+    const allowedCommands =
+      profile.command_policy?.allowed_when_verified ?? [];
+    if (
+      item.command_ids.length === 0 ||
+      item.command_ids.some((command) => !allowedCommands.includes(command))
+    ) {
+      addBlocker("provider_command_mismatch");
+    }
+    const allowedArtifactKinds = new Set(
+      profile.artifact_contracts.map((contract) => contract.capability),
+    );
+    if (
+      item.artifact_kinds.length === 0 ||
+      new Set(item.artifact_kinds).size !== item.artifact_kinds.length ||
+      item.artifact_kinds.some(
+        (artifactKind) => !allowedArtifactKinds.has(artifactKind),
+      )
+    ) {
+      addBlocker("provider_artifact_mismatch");
+    }
+    if (
+      canonicalJson([...profile.supported_platforms].sort()) !==
+      canonicalJson(["claude-code", "codex"])
+    ) {
+      addBlocker("provider_platform_not_verified");
+    }
+    if (item.evidence_kind !== "controlled-redacted-real-usage") {
+      addBlocker("synthetic_provider_evidence");
+    }
+    owners.push(item.owner);
+    if (item.owner_unique !== true) {
+      addBlocker("provider_owner_conflict");
+    }
+    const quality = item.quality;
+    if (
+      quality.max_score <= 0 ||
+      quality.baseline_score < 0 ||
+      quality.candidate_score < 0 ||
+      quality.baseline_score > quality.max_score ||
+      quality.candidate_score > quality.max_score ||
+      quality.candidate_score <= quality.baseline_score ||
+      quality.improvements.length === 0 ||
+      new Set(quality.improvements).size !== quality.improvements.length ||
+      quality.regressions.length > 0
+    ) {
+      addBlocker("provider_quality_regression");
+    }
+    const cost = item.cost;
+    if (
+      cost.elapsed_seconds < 0 ||
+      cost.tool_calls < 0 ||
+      cost.artifact_bytes <= 0
+    ) {
+      addBlocker("provider_cost_invalid");
+    }
+    if (
+      item.isolated_home !== true ||
+      item.isolated_repository !== true ||
+      item.primary_provider_installation_modified !== false ||
+      item.remote_writes_executed !== false ||
+      item.telemetry_disabled !== true ||
+      item.fallback_validated !== true ||
+      item.safety_passed !== true ||
+      item.passed !== true
+    ) {
+      addBlocker("provider_case_failed");
+    }
+  }
+  if (new Set(owners).size !== owners.length) {
+    addBlocker("provider_owner_conflict");
+  }
+
+  const platformIds = aggregate.platforms.map((item) => item.id);
+  if (
+    canonicalJson([...platformIds].sort()) !==
+      canonicalJson(["claude-code", "codex"]) ||
+    new Set(platformIds).size !== platformIds.length
+  ) {
+    addBlocker("provider_platform_set_invalid");
+  }
+  const platformChecks = [
+    "installation_validated",
+    "positive_trigger",
+    "negative_non_trigger",
+    "provider_selection",
+    "artifact_bridge",
+    "fallback",
+    "local_analysis_only",
+    "passed",
+  ];
+  if (
+    aggregate.platforms.some(
+      (platform) =>
+        platform.files_modified !== false ||
+        platformChecks.some((field) => platform[field] !== true),
+    )
+  ) {
+    addBlocker("provider_platform_validation_failed");
+  }
+  if (aggregate.passed !== true) {
+    addBlocker("provider_aggregate_not_passed");
+  }
+  return {
+    passed: blockers.length === 0,
+    blockers,
+    candidate_skill_fingerprint: aggregate.candidate_skill_fingerprint,
+    formal_provider_ids: [...FORMAL_PROVIDER_IDS],
+    case_provider_ids: [...caseIds],
+    platform_ids: [...platformIds],
+  };
+}
+
+/** Separates pre-release candidate readiness from post-release verification. */
+export function stableReleaseGate({
+  providerValidation,
+  expectedRepository,
+  expectedVersion,
+  expectedCommit,
+  publicationProof,
+}) {
+  if (!isObject(providerValidation)) {
+    throw new Error("providerValidation 必須是 object");
+  }
+  const stableCandidateReady = providerValidation.passed === true;
+  let publicationVerified = false;
+  const blockers = [...(providerValidation.blockers ?? [])];
+  if (publicationProof !== null && publicationProof !== undefined) {
+    validateDocument("publication-proof", publicationProof);
+    publicationVerified =
+      stableCandidateReady &&
+      publicationProof.official === true &&
+      publicationProof.repository === expectedRepository &&
+      publicationProof.version === expectedVersion &&
+      publicationProof.tag === `v${expectedVersion}` &&
+      publicationProof.commit === expectedCommit;
+    if (!publicationVerified) {
+      blockers.push("publication_proof_mismatch");
+    }
+  }
+  return {
+    stable_candidate_ready: stableCandidateReady,
+    release_preview_allowed: stableCandidateReady,
+    publication_verified: publicationVerified,
+    blockers: [...new Set(blockers)],
   };
 }
 

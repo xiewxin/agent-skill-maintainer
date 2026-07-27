@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "profile_schema_version": 1,
+  "schema_version": 2,
+  "profile_schema_version": 2,
   "provider_id": "openspec",
   "role_type": "formal",
   "version_detection": {
@@ -9,14 +9,15 @@
     "version_files": ["openspec/config.yaml"]
   },
   "tested_versions": ["v1.6.0"],
-  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "last_verified_at": "2026-07-27T00:00:00.000Z",
   "verification_evidence": [
     {
       "version": "v1.6.0",
       "repository": "Fission-AI/OpenSpec",
       "repository_status": "active",
       "release_url": "https://github.com/Fission-AI/OpenSpec/releases/tag/v1.6.0",
-      "scope": "artifact-contract-read-only",
+      "release_commit": "e1b51d111ab446b54dee2d6159ac245f0339ae52",
+      "scope": "commands",
       "artifacts": [
         "openspec/changes/add-global-install-scope/proposal.md",
         "openspec/changes/add-global-install-scope/design.md",
@@ -25,14 +26,17 @@
       ]
     }
   ],
-  "supported_platforms": [],
+  "supported_platforms": ["codex", "claude-code"],
   "capabilities": ["proposal", "design", "task-decomposition", "spec-delta"],
   "artifact_contracts": [
     {"capability": "proposal", "ownership": "provider", "discovery": "openspec/changes/*/proposal.md"},
     {"capability": "design", "ownership": "provider", "discovery": "openspec/changes/*/design.md"},
     {"capability": "spec-delta", "ownership": "provider", "discovery": "openspec/changes/*/specs"}
   ],
-  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "command_policy": {
+    "default": "deny",
+    "allowed_when_verified": ["opsx:propose", "opsx:verify"]
+  },
   "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
   "blocking": {"repository_required_failure": true}
 }

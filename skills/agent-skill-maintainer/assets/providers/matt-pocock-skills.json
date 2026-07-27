@@ -1,0 +1,58 @@
+{
+  "schema_version": 2,
+  "profile_schema_version": 2,
+  "provider_id": "matt-pocock-skills",
+  "role_type": "formal",
+  "version_detection": {
+    "kind": "filesystem",
+    "markers": ["skills/engineering/to-spec", "skills/engineering/to-tickets"],
+    "version_files": ["package.json"]
+  },
+  "tested_versions": ["v1.1.0"],
+  "last_verified_at": "2026-07-27T00:00:00.000Z",
+  "verification_evidence": [
+    {
+      "version": "v1.1.0",
+      "repository": "mattpocock/skills",
+      "repository_status": "active",
+      "release_url": "https://github.com/mattpocock/skills/releases/tag/v1.1.0",
+      "release_commit": "d574778f94cf620fcc8ce741584093bc650a61d3",
+      "scope": "commands",
+      "artifacts": [
+        "skills/engineering/to-spec/SKILL.md",
+        "skills/engineering/to-tickets/SKILL.md",
+        "skills/engineering/tdd/SKILL.md",
+        "skills/engineering/code-review/SKILL.md"
+      ]
+    }
+  ],
+  "supported_platforms": ["codex", "claude-code"],
+  "capabilities": [
+    "specification",
+    "vertical-ticket-decomposition",
+    "test-driven-development",
+    "code-review"
+  ],
+  "artifact_contracts": [
+    {
+      "capability": "specification",
+      "ownership": "provider",
+      "discovery": "conversation-derived specification"
+    },
+    {
+      "capability": "vertical-ticket-decomposition",
+      "ownership": "provider",
+      "discovery": "local tickets.md or configured issue tracker"
+    }
+  ],
+  "command_policy": {
+    "default": "deny",
+    "allowed_when_verified": ["to-spec", "to-tickets"]
+  },
+  "fallback": {
+    "missing": "unavailable",
+    "unknown_version": "compatible-read-only",
+    "breaking": "unsupported"
+  },
+  "blocking": {"repository_required_failure": true}
+}

@@ -42,7 +42,7 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
 
 test("all public schemas parse and lock an explicit version", () => {
-  assert.equal(SCHEMA_NAMES.length, 27);
+  assert.equal(SCHEMA_NAMES.length, 28);
   for (const schema of SCHEMA_NAMES) {
     const document = JSON.parse(
       readFileSync(
@@ -455,7 +455,7 @@ test("documentation impact is structured, scoped, and contract-preserving", () =
   );
 });
 
-test("Provider profiles publish version-scoped read-only evidence", () => {
+test("Provider profiles publish version-scoped evidence without overclaiming", () => {
   const profiles = loadProviderProfiles(
     resolve(SKILL_ROOT, "assets", "providers"),
   );
@@ -464,7 +464,7 @@ test("Provider profiles publish version-scoped read-only evidence", () => {
     const missing = resolveProviderSupport(profile, { detectedVersion: null });
     assert.ok(["compatible-read-only", "unavailable"].includes(missing.status));
     assert.equal(missing.commands_allowed, false);
-    if (profile.role_type === "formal") {
+    if (["formal", "legacy"].includes(profile.role_type)) {
       assert.equal(profile.tested_versions.length, 1, id);
       assert.equal(profile.verification_evidence.length, 1, id);
       assert.equal(
@@ -472,9 +472,10 @@ test("Provider profiles publish version-scoped read-only evidence", () => {
         profile.tested_versions[0],
         id,
       );
-      assert.equal(
-        profile.verification_evidence[0].scope,
-        "artifact-contract-read-only",
+      assert.ok(
+        ["artifact-contract-read-only", "commands"].includes(
+          profile.verification_evidence[0].scope,
+        ),
         id,
       );
       assert.ok(profile.verification_evidence[0].artifacts.length > 0, id);
@@ -482,8 +483,17 @@ test("Provider profiles publish version-scoped read-only evidence", () => {
       const verified = resolveProviderSupport(profile, {
         detectedVersion: profile.tested_versions[0],
       });
-      assert.equal(verified.status, "verified", id);
-      assert.equal(verified.commands_allowed, false, id);
+      if (profile.role_type === "legacy") {
+        assert.equal(verified.status, "compatible-read-only", id);
+        assert.equal(verified.commands_allowed, false, id);
+      } else {
+        assert.equal(verified.status, "verified", id);
+        assert.equal(
+          verified.commands_allowed,
+          profile.verification_evidence[0].scope === "commands",
+          id,
+        );
+      }
     } else {
       assert.deepEqual(profile.tested_versions, [], id);
       assert.deepEqual(profile.verification_evidence, [], id);

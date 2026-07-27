@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "profile_schema_version": 1,
+  "schema_version": 2,
+  "profile_schema_version": 2,
   "provider_id": "bmad",
   "role_type": "formal",
   "version_detection": {
@@ -9,14 +9,15 @@
     "version_files": [".bmad-core/core-config.yaml", "_bmad/_config/manifest.yaml"]
   },
   "tested_versions": ["v6.10.0"],
-  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "last_verified_at": "2026-07-27T00:00:00.000Z",
   "verification_evidence": [
     {
       "version": "v6.10.0",
       "repository": "bmad-code-org/BMAD-METHOD",
       "repository_status": "active",
       "release_url": "https://github.com/bmad-code-org/BMAD-METHOD/releases/tag/v6.10.0",
-      "scope": "artifact-contract-read-only",
+      "release_commit": "081e64ee5aab2316b912883f7bee528ee143ce36",
+      "scope": "commands",
       "artifacts": [
         "src/core-skills/bmad-spec/SKILL.md",
         "src/bmm-skills/2-plan-workflows/bmad-prd/SKILL.md",
@@ -25,14 +26,18 @@
       ]
     }
   ],
-  "supported_platforms": [],
+  "supported_platforms": ["codex", "claude-code"],
   "capabilities": ["quick-flow", "product-requirements", "architecture", "story"],
   "artifact_contracts": [
+    {"capability": "quick-flow", "ownership": "provider", "discovery": "repository-defined SPEC.md and .memlog.md"},
     {"capability": "product-requirements", "ownership": "provider", "discovery": "repository-defined PRD artifact"},
     {"capability": "architecture", "ownership": "provider", "discovery": "repository-defined architecture artifact"},
     {"capability": "story", "ownership": "provider", "discovery": "repository-defined story artifact"}
   ],
-  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "command_policy": {
+    "default": "deny",
+    "allowed_when_verified": ["bmad-spec"]
+  },
   "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
   "blocking": {"repository_required_failure": true}
 }
