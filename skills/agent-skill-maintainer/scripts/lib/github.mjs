@@ -25,6 +25,7 @@ import {
 } from "./git.mjs";
 
 const ACTIONS = new Set([
+  "fork_create",
   "branch_push",
   "pr_create",
   "pr_update",
@@ -56,6 +57,16 @@ const MAX_APPROVAL_TTL_MS = 30 * 60 * 1000;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/u;
+const FORK_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Carries the deterministic reconcile status for a Fork observation failure. */
+class ForkObservationError extends ApprovalDriftError {
+  constructor(message, reconciliationStatus) {
+    super(message);
+    this.name = "ForkObservationError";
+    this.reconciliationStatus = reconciliationStatus;
+  }
+}
 
 /** Runs GitHub CLI without shell expansion or an interactive prompt. */
 function defaultRunner(arguments_, { environment = {} } = {}) {
@@ -90,6 +101,38 @@ function runGithub(runner, arguments_, options = {}) {
     throw new Error(`GitHub CLI 執行失敗：${summary}`);
   }
   return result.stdout.trim();
+}
+
+/** Classifies one attempted Fork POST without exposing an unredacted error. */
+function runForkCreateRequest(runner, arguments_) {
+  const result = runner(arguments_);
+  if (
+    !isObject(result) ||
+    !Number.isInteger(result.status) ||
+    typeof result.stdout !== "string" ||
+    typeof result.stderr !== "string"
+  ) {
+    return {
+      status: "pending",
+      reason: "GitHub Fork 建立回應不完整",
+    };
+  }
+  if (result.status === 0) {
+    return { status: "accepted", reason: null };
+  }
+  const summary = redactText(
+    result.stderr.trim().split(/\r?\n/u)[0] || "unknown error",
+  );
+  if (/\b4[0-9]{2}\b/u.test(summary)) {
+    return {
+      status: "blocked",
+      reason: `GitHub 明確拒絕 Fork 建立：${summary}`,
+    };
+  }
+  return {
+    status: "pending",
+    reason: `GitHub Fork 建立結果不確定：${summary}`,
+  };
 }
 
 /** Returns the validated branch-push target from one preview. */
@@ -137,6 +180,48 @@ function branchPushTarget(preview) {
     candidatePathFingerprint: target.candidate_path_fingerprint,
     expectedRemoteCommit: target.expected_remote_commit,
     headRepository,
+    operation: target.operation,
+  };
+}
+
+/** Returns the immutable personal Fork target from one preview. */
+function forkTarget(preview) {
+  const target = preview.state.action_target;
+  if (preview.state.relationship !== "contribute") {
+    throw new Error("fork_create 只適用於 contribute 關係");
+  }
+  const repositoryName = preview.state.repository.split("/")[1];
+  const expectedRepository = `${preview.state.account}/${repositoryName}`;
+  if (
+    typeof target.fork_repository !== "string" ||
+    !REPOSITORY_PATTERN.test(target.fork_repository) ||
+    target.fork_repository.toLowerCase() !==
+      expectedRepository.toLowerCase()
+  ) {
+    throw new Error(
+      "Fork destination 必須是 active account 的同名個人倉庫",
+    );
+  }
+  if (target.default_branch_only !== true) {
+    throw new Error("Fork 第一版必須使用 default_branch_only=true");
+  }
+  if (!["create", "reuse"].includes(target.operation)) {
+    throw new Error("Fork operation 必須是 create 或 reuse");
+  }
+  const expectedFields = [
+    "fork_repository",
+    "default_branch_only",
+    "operation",
+  ];
+  const unknown = Object.keys(target)
+    .filter((name) => !expectedFields.includes(name))
+    .sort();
+  if (unknown.length > 0) {
+    throw new Error(`Fork target 含未知欄位：${unknown.join(", ")}`);
+  }
+  return {
+    forkRepository: target.fork_repository,
+    defaultBranchOnly: true,
     operation: target.operation,
   };
 }
@@ -264,6 +349,133 @@ function parseGithubArray(value, label) {
     throw new Error(`${label} 必須回傳 JSON array`);
   }
   return document;
+}
+
+/** Reads an optional GitHub JSON object and treats only a real 404 as absent. */
+function readOptionalGithubJson(runner, arguments_, label) {
+  const result = runner(arguments_);
+  if (
+    !isObject(result) ||
+    !Number.isInteger(result.status) ||
+    typeof result.stdout !== "string" ||
+    typeof result.stderr !== "string"
+  ) {
+    throw new Error("GitHub runner 回傳格式不合法");
+  }
+  if (result.status === 0) {
+    return parseGithubJson(result.stdout.trim(), label);
+  }
+  const summary = redactText(
+    result.stderr.trim().split(/\r?\n/u)[0] || "unknown error",
+  );
+  if (
+    /(?:\b404\b|^not found(?:\b|:)|could not resolve to a repository)/iu.test(
+      summary,
+    )
+  ) {
+    return null;
+  }
+  throw new Error(`GitHub CLI 執行失敗：${summary}`);
+}
+
+/** Verifies one personal Fork repository against the approved destination. */
+function validatePersonalForkRepository(
+  repository,
+  { forkRepository, upstreamRepository },
+) {
+  if (
+    repository.nameWithOwner?.toLowerCase() !==
+      forkRepository.toLowerCase()
+  ) {
+    throw new ForkObservationError(
+      "Fork repository identity 已漂移",
+      "drifted",
+    );
+  }
+  if (
+    repository.parent?.nameWithOwner?.toLowerCase() !==
+      upstreamRepository.toLowerCase()
+  ) {
+    throw new ForkObservationError(
+      "Fork parent 與核准上游不一致",
+      "drifted",
+    );
+  }
+  if (!MANAGED_PERMISSIONS.has(repository.viewerPermission)) {
+    throw new ForkObservationError(
+      "Fork permission 不足以推送分支",
+      "blocked",
+    );
+  }
+  return repository;
+}
+
+/** Reads and validates the expected personal Fork and base commit. */
+function readForkObservation(preview, runner) {
+  const target = forkTarget(preview);
+  const repository = readOptionalGithubJson(
+    runner,
+    [
+      "repo",
+      "view",
+      target.forkRepository,
+      "--json",
+      "nameWithOwner,viewerPermission,parent",
+    ],
+    "GitHub Fork repository",
+  );
+  if (repository === null) {
+    return {
+      exists: false,
+      base_commit_available: false,
+    };
+  }
+  validatePersonalForkRepository(repository, {
+    forkRepository: target.forkRepository,
+    upstreamRepository: preview.state.repository,
+  });
+  const commit = readOptionalGithubJson(
+    runner,
+    [
+      "api",
+      `repos/${target.forkRepository}/commits/${preview.state.base_commit}`,
+      "--jq",
+      "{sha: .sha}",
+    ],
+    "GitHub Fork base commit",
+  );
+  return {
+    exists: true,
+    base_commit_available:
+      commit?.sha === preview.state.base_commit,
+  };
+}
+
+/** Builds one verified Fork proof after the destination is observable. */
+function buildForkProof(preview, observation) {
+  if (
+    observation?.exists !== true ||
+    observation.base_commit_available !== true
+  ) {
+    throw new Error("Fork 尚未具備可驗證的基準提交");
+  }
+  const target = forkTarget(preview);
+  const proof = {
+    schema_version: 1,
+    repository: preview.state.repository,
+    fork_repository: target.forkRepository,
+    account: preview.state.account,
+    relationship: "contribute",
+    base_branch: preview.state.base_branch,
+    base_commit: preview.state.base_commit,
+    default_branch_only: true,
+    operation: target.operation,
+    parent_repository: preview.state.repository,
+    base_commit_available: true,
+    verified: true,
+  };
+  validateDocument("fork-proof", proof);
+  return proof;
 }
 
 /** Requires a non-empty bounded text field. */
@@ -412,11 +624,12 @@ function headRepositoryForPreview(preview) {
   return candidate;
 }
 
-/** Builds a redacted absence proof for one previously attempted action. */
-function buildNotAppliedResult(
+/** Builds one redacted reconciliation record for a prior remote attempt. */
+function buildActionReconciliationResult(
   preview,
   approvalFingerprint,
   remoteState,
+  status,
   now,
 ) {
   if (
@@ -428,23 +641,58 @@ function buildNotAppliedResult(
   const observedAt = now instanceof Date
     ? now.toISOString()
     : new Date(now).toISOString();
-  const absenceProof = {
+  if (
+    !["not_applied", "pending", "blocked", "drifted"].includes(status)
+  ) {
+    throw new Error("GitHub reconcile status 不合法");
+  }
+  const reconciliation = {
     schema_version: 1,
     action: preview.action,
     repository: preview.state.repository,
     approval_fingerprint: approvalFingerprint,
     preview_fingerprint: preview.fingerprint,
     observed_at: observedAt,
-    status: "not_applied",
+    status,
     remote_state_hash: fingerprint(remoteState),
   };
-  validateDocument("github-action-reconciliation", absenceProof);
-  return {
+  validateDocument("github-action-reconciliation", reconciliation);
+  const result = {
     action: preview.action,
     repository: preview.state.repository,
-    status: "not_applied",
-    absence_proof: absenceProof,
+    status,
+    reconciliation,
   };
+  if (status === "pending") {
+    result.guidance =
+      "稍後執行唯讀 github-reconcile；不得重送 Fork 建立 POST";
+  } else if (status === "blocked") {
+    result.guidance =
+      "需要人工調查阻擋原因；不得重送 Fork 建立 POST";
+  } else if (status === "drifted") {
+    result.guidance =
+      "重新確認帳號、上游與目的地關係；不得沿用目前預覽";
+  }
+  if (status === "not_applied") {
+    result.absence_proof = reconciliation;
+  }
+  return result;
+}
+
+/** Builds a redacted absence proof for one previously attempted action. */
+function buildNotAppliedResult(
+  preview,
+  approvalFingerprint,
+  remoteState,
+  now,
+) {
+  return buildActionReconciliationResult(
+    preview,
+    approvalFingerprint,
+    remoteState,
+    "not_applied",
+    now,
+  );
 }
 
 /** Reads the exact release and tag state for one version. */
@@ -825,6 +1073,7 @@ export function inspectGithubActionState(
   {
     runner = defaultRunner,
     allowBaseCommitDrift = false,
+    allowForkDestination = false,
   } = {},
 ) {
   const current = buildGithubActionPreview(preview.action, preview.state);
@@ -861,6 +1110,38 @@ export function inspectGithubActionState(
     throw new ApprovalDriftError("GitHub repository 寫入權限已漂移");
   }
   if (
+    preview.state.relationship === "contribute" &&
+    MANAGED_PERMISSIONS.has(repository.viewerPermission)
+  ) {
+    throw new ApprovalDriftError(
+      "GitHub repository 關係已由 contribute 漂移為 managed",
+    );
+  }
+  if (preview.action === "fork_create") {
+    const target = forkTarget(preview);
+    const observation = readForkObservation(preview, runner);
+    if (
+      target.operation === "create" &&
+      allowForkDestination !== true &&
+      observation.exists
+    ) {
+      throw new ApprovalDriftError(
+        "個人 Fork 已存在，必須重新預覽為 reuse",
+      );
+    }
+    if (
+      target.operation === "reuse" &&
+      (
+        observation.exists !== true ||
+        observation.base_commit_available !== true
+      )
+    ) {
+      throw new ApprovalDriftError(
+        "reuse Fork 尚未具備核准的基準提交",
+      );
+    }
+  }
+  if (
     preview.action === "branch_push" &&
     preview.state.relationship === "contribute"
   ) {
@@ -879,21 +1160,14 @@ export function inspectGithubActionState(
       );
     } catch (error) {
       throw new ApprovalDriftError(
-        "contribute Fork 不存在或無法驗證；目前不支援自動建立 Fork",
+        "contribute Fork 不存在或無法驗證；請先完成 fork_create 或既有 Fork 驗證",
         { cause: error },
       );
     }
-    if (
-      fork.nameWithOwner?.toLowerCase() !==
-        headRepository.toLowerCase() ||
-      !MANAGED_PERMISSIONS.has(fork.viewerPermission) ||
-      fork.parent?.nameWithOwner?.toLowerCase() !==
-        preview.state.repository.toLowerCase()
-    ) {
-      throw new ApprovalDriftError(
-        "contribute Fork owner、parent 或寫入權限已漂移",
-      );
-    }
+    validatePersonalForkRepository(fork, {
+      forkRepository: headRepository,
+      upstreamRepository: preview.state.repository,
+    });
   }
   let baseCommit;
   if (allowBaseCommitDrift !== true) {
@@ -999,6 +1273,22 @@ export function inspectGithubActionState(
   return clone(preview.state);
 }
 
+/** Verifies an existing personal Fork without creating a remote mutation. */
+export function verifyExistingFork(
+  state,
+  { runner = defaultRunner } = {},
+) {
+  const preview = buildGithubActionPreview("fork_create", state);
+  if (forkTarget(preview).operation !== "reuse") {
+    throw new Error("既有 Fork 驗證必須使用 operation=reuse");
+  }
+  inspectGithubActionState(preview, { runner });
+  return buildForkProof(
+    preview,
+    readForkObservation(preview, runner),
+  );
+}
+
 /** Validates and normalizes a complete GitHub action state. */
 function normalizePreview(action, state) {
   if (!ACTIONS.has(action)) {
@@ -1069,6 +1359,9 @@ function normalizePreview(action, state) {
   }
   if (["pr_create", "pr_update"].includes(action)) {
     headRepositoryForPreview({ state });
+  }
+  if (action === "fork_create") {
+    forkTarget({ action, state });
   }
   if (action === "branch_push") {
     branchPushTarget({ action, state });
@@ -1300,6 +1593,124 @@ function applyBranchPush(
   };
 }
 
+/** Applies or reuses one exact personal Fork without cloning it locally. */
+function applyForkCreate(
+  preview,
+  approval,
+  {
+    runner,
+    now,
+  },
+) {
+  const target = forkTarget(preview);
+  try {
+    inspectGithubActionState(preview, { runner });
+  } catch (error) {
+    if (target.operation !== "create") {
+      throw error;
+    }
+    const result = buildActionReconciliationResult(
+      preview,
+      approval.fingerprint,
+      {
+        fork_repository: target.forkRepository,
+        condition: "preflight_failed_before_post",
+      },
+      "not_applied",
+      now,
+    );
+    result.reason = redactText(
+      error instanceof Error
+        ? error.message
+        : "Fork 建立前核對失敗",
+    );
+    result.guidance =
+      "遠端寫入未執行；修正核對問題後重新預覽並取得新的確認";
+    return result;
+  }
+  let requestAccepted = false;
+  if (target.operation === "create") {
+    const request = runForkCreateRequest(runner, [
+      "api",
+      "--method",
+      "POST",
+      `repos/${preview.state.repository}/forks`,
+      "-F",
+      "default_branch_only=true",
+    ]);
+    if (request.status !== "accepted") {
+      const result = buildActionReconciliationResult(
+        preview,
+        approval.fingerprint,
+        {
+          fork_repository: target.forkRepository,
+          condition:
+            request.status === "blocked"
+              ? "request_rejected"
+              : "request_outcome_unknown",
+        },
+        request.status,
+        now,
+      );
+      result.reason = request.reason;
+      return result;
+    }
+    requestAccepted = true;
+  }
+  let observation;
+  try {
+    observation = readForkObservation(preview, runner);
+  } catch (error) {
+    if (!requestAccepted) {
+      throw error;
+    }
+    const status =
+      error instanceof ForkObservationError
+        ? error.reconciliationStatus
+        : "pending";
+    const result = buildActionReconciliationResult(
+      preview,
+      approval.fingerprint,
+      {
+        fork_repository: target.forkRepository,
+        condition:
+          error instanceof ForkObservationError
+            ? "identity_or_permission_drift"
+            : "post_accepted_observation_failed",
+      },
+      status,
+      now,
+    );
+    result.reason =
+      error instanceof ForkObservationError
+        ? redactText(error.message)
+        : "Fork 建立已受理，但後續核對暫時失敗";
+    return result;
+  }
+  if (
+    observation.exists === true &&
+    observation.base_commit_available === true
+  ) {
+    return {
+      action: "fork_create",
+      repository: preview.state.repository,
+      status: "applied",
+      proof: buildForkProof(preview, observation),
+    };
+  }
+  return buildActionReconciliationResult(
+    preview,
+    approval.fingerprint,
+    {
+      fork_repository: target.forkRepository,
+      exists: observation.exists,
+      base_commit_available: observation.base_commit_available,
+    },
+    "pending",
+    now,
+  );
+}
+
 /** Applies one confirmed action after re-reading its remote GitHub state. */
 export function applyGithubAction(
   preview,
@@ -1315,6 +1726,12 @@ export function applyGithubAction(
   } = {},
 ) {
   verifyGithubActionApproval(approval, preview, { now });
+  if (preview.action === "fork_create") {
+    return applyForkCreate(preview, approval, {
+      runner,
+      now,
+    });
+  }
   if (preview.action === "branch_push") {
     return applyBranchPush(preview, {
       runner,
@@ -1362,10 +1779,71 @@ export function reconcileGithubAction(
     now = new Date(),
     gitRunner,
     temporaryRoot,
+    attemptedAt,
   } = {},
 ) {
   let reconciliation;
-  if (preview.action === "branch_push") {
+  if (preview.action === "fork_create") {
+    const target = forkTarget(preview);
+    let observation;
+    try {
+      inspectGithubActionState(preview, {
+        runner,
+        allowForkDestination: true,
+      });
+      observation = readForkObservation(preview, runner);
+    } catch (error) {
+      if (!(error instanceof ApprovalDriftError)) {
+        throw error;
+      }
+      const status =
+        error instanceof ForkObservationError
+          ? error.reconciliationStatus
+          : "drifted";
+      return buildActionReconciliationResult(
+        preview,
+        approvalFingerprint,
+        {
+          fork_repository: target.forkRepository,
+          condition: "identity_or_permission_drift",
+        },
+        status,
+        now,
+      );
+    }
+    if (
+      observation.exists === true &&
+      observation.base_commit_available === true
+    ) {
+      reconciliation = {
+        status: "applied",
+        proof: buildForkProof(preview, observation),
+      };
+    } else {
+      const attempted = Date.parse(attemptedAt);
+      const observed = now instanceof Date
+        ? now.getTime()
+        : Date.parse(now);
+      if (!Number.isFinite(attempted) || !Number.isFinite(observed)) {
+        throw new Error("Fork reconcile 缺少合法 attempted_at");
+      }
+      const status =
+        observed - attempted >= FORK_PENDING_TIMEOUT_MS
+          ? "blocked"
+          : "pending";
+      return buildActionReconciliationResult(
+        preview,
+        approvalFingerprint,
+        {
+          fork_repository: target.forkRepository,
+          exists: observation.exists,
+          base_commit_available: observation.base_commit_available,
+        },
+        status,
+        now,
+      );
+    }
+  } else if (preview.action === "branch_push") {
     inspectGithubActionState(preview, {
       runner,
       allowBaseCommitDrift: true,

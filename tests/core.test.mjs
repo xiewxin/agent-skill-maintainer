@@ -42,7 +42,7 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
 
 test("all public schemas parse and lock an explicit version", () => {
-  assert.equal(SCHEMA_NAMES.length, 21);
+  assert.equal(SCHEMA_NAMES.length, 23);
   for (const schema of SCHEMA_NAMES) {
     const document = JSON.parse(
       readFileSync(
@@ -60,10 +60,10 @@ test("all public schemas parse and lock an explicit version", () => {
 });
 
 test("runtime schema validation rejects incomplete documents", () => {
-  assert.throws(() => validateDocument("run-state", { schema_version: 5 }));
+  assert.throws(() => validateDocument("run-state", { schema_version: 6 }));
   assert.equal(
     validateDocument("run-state", {
-      schema_version: 5,
+      schema_version: 6,
       run_id: "run-001",
       binding_id: "binding-001",
       phase: "target_selection",

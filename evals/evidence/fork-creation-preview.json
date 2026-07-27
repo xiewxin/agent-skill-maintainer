@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "fork-forward-aggregate",
+  "evaluated_at": "2026-07-24T11:53:50.000Z",
+  "fixture": "synthetic/fork-creation",
+  "candidate_skill_fingerprint": "3f9ec1eddb1df4812967669356d3ce86460505f3a8d8e39dcbdbb5f126b42f5d",
+  "raw_outputs_published": false,
+  "remote_actions_executed": false,
+  "platforms": [
+    {
+      "id": "codex",
+      "version": "codex-cli 0.139.0",
+      "explicit_trigger": true,
+      "target_and_reference_read": true,
+      "confirmed_create_exactly_one_post": true,
+      "missing_fork_requires_preview_and_confirmation": true,
+      "organization_destination_blocks": true,
+      "unrelated_destination_blocks": true,
+      "uncertain_attempt_reconciles_without_post": true,
+      "separate_later_action_confirmations": true,
+      "files_modified": false,
+      "passed": true
+    },
+    {
+      "id": "claude-code",
+      "version": "2.1.152",
+      "explicit_trigger": true,
+      "target_and_reference_read": true,
+      "confirmed_create_exactly_one_post": true,
+      "missing_fork_requires_preview_and_confirmation": true,
+      "organization_destination_blocks": true,
+      "unrelated_destination_blocks": true,
+      "uncertain_attempt_reconciles_without_post": true,
+      "separate_later_action_confirmations": true,
+      "files_modified": false,
+      "passed": true
+    }
+  ],
+  "passed": true
+}

@@ -156,6 +156,21 @@ const BRANCH_PUSH_PROOF = Object.freeze({
   verified: true,
 });
 
+const FORK_PROOF = Object.freeze({
+  schema_version: 1,
+  repository: "example/skill",
+  fork_repository: "example-user/skill",
+  account: "example-user",
+  relationship: "contribute",
+  base_branch: "main",
+  base_commit: REPOSITORY_SNAPSHOT.merge_base,
+  default_branch_only: true,
+  operation: "create",
+  parent_repository: "example/skill",
+  base_commit_available: true,
+  verified: true,
+});
+
 const RELEASE_COVERAGE = Object.freeze(
   evaluateReleaseNoteCoverage(
     {
@@ -199,7 +214,16 @@ function actionEvidence(
       ? headCommit
       : REPOSITORY_SNAPSHOT.merge_base,
     runId = "run-001",
-    actionTarget = action === "branch_push"
+    relationship = action === "fork_create"
+      ? "contribute"
+      : "managed",
+    actionTarget = action === "fork_create"
+      ? {
+          fork_repository: "example-user/skill",
+          default_branch_only: true,
+          operation: "create",
+        }
+      : action === "branch_push"
       ? {
           candidate_path_fingerprint: "d".repeat(64),
           expected_remote_commit: null,
@@ -216,7 +240,7 @@ function actionEvidence(
     binding_id: "binding-001",
     account: "example-user",
     repository: "example/skill",
-    relationship: "managed",
+    relationship,
     base_branch: "main",
     base_commit: baseCommit,
     head_branch: "feature",
@@ -253,7 +277,7 @@ test("run state is minimal, versioned, and recoverable", () => {
       bindingId: "binding-001",
       target: { skill: "example-skill", repository: "example/skill" },
     });
-    assert.equal(created.schema_version, 5);
+    assert.equal(created.schema_version, 6);
     assert.equal(created.phase, "target_selection");
     assert.deepEqual(readRun(root, "run-001"), created);
     assert.doesNotMatch(JSON.stringify(created), /raw_transcript|secret/u);
@@ -395,6 +419,208 @@ test("full managed lifecycle includes PR update and local update", () => {
       assert.equal(document.phase, phase);
     }
     assert.equal(document.status, "completed");
+  });
+});
+
+test("contribute lifecycle requires verified Fork proof before branch push", () => {
+  withStateRoot((root) => {
+    createRun(root, {
+      runId: "run-001",
+      bindingId: "binding-001",
+      target: { skill: "example-skill", repository: "example/skill" },
+    });
+    for (const [phase, updates] of [
+      ["evidence_collection", {}],
+      ["feedback_validation", {}],
+      ["optimization_design", {}],
+      ["optimization_approval", {}],
+      [
+        "isolation",
+        {
+          repository_snapshot: REPOSITORY_SNAPSHOT,
+          approvals: [implementationApproval()],
+        },
+      ],
+      ["implementation", {}],
+      ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
+    ]) {
+      transitionRun(root, "run-001", phase, { updates });
+    }
+    const branchEvidence = actionEvidence("branch_push", {
+      relationship: "contribute",
+      actionTarget: {
+        candidate_path_fingerprint: "d".repeat(64),
+        expected_remote_commit: null,
+        head_repository: "example-user/skill",
+        operation: "create",
+      },
+    });
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "branch_push", {
+          updates: {
+            validation_summary: VALIDATION_SUMMARY,
+            ...branchEvidence,
+          },
+        }),
+      /Fork proof/u,
+    );
+
+    transitionRun(root, "run-001", "fork_creation", {
+      updates: {
+        validation_summary: VALIDATION_SUMMARY,
+        ...actionEvidence("fork_create"),
+      },
+    });
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "branch_push", {
+          updates: {
+            fork_proof: {
+              ...FORK_PROOF,
+              parent_repository: "other/skill",
+            },
+            validation_summary: VALIDATION_SUMMARY,
+            ...branchEvidence,
+          },
+        }),
+      /Fork proof/u,
+    );
+    const pushed = transitionRun(root, "run-001", "branch_push", {
+      updates: {
+        fork_proof: FORK_PROOF,
+        validation_summary: VALIDATION_SUMMARY,
+        ...branchEvidence,
+      },
+    });
+    assert.equal(pushed.phase, "branch_push");
+    assert.deepEqual(pushed.fork_proof, FORK_PROOF);
+  });
+});
+
+test("Fork attempts persist time and pending reconciliation without replay", () => {
+  withStateRoot((root) => {
+    createRun(root, {
+      runId: "run-001",
+      bindingId: "binding-001",
+      target: { skill: "example-skill", repository: "example/skill" },
+    });
+    for (const [phase, updates] of [
+      ["evidence_collection", {}],
+      ["feedback_validation", {}],
+      ["optimization_design", {}],
+      ["optimization_approval", {}],
+      [
+        "isolation",
+        {
+          repository_snapshot: REPOSITORY_SNAPSHOT,
+          approvals: [implementationApproval()],
+        },
+      ],
+      ["implementation", {}],
+      ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
+    ]) {
+      transitionRun(root, "run-001", phase, { updates });
+    }
+    const evidence = actionEvidence("fork_create");
+    transitionRun(root, "run-001", "fork_creation", {
+      updates: {
+        validation_summary: VALIDATION_SUMMARY,
+        ...evidence,
+      },
+    });
+    const approval = evidence.approvals[0];
+    const attemptedAt = approval.confirmed_at;
+    const reserved = reserveGithubActionApply(
+      root,
+      "run-001",
+      evidence.action_preview,
+      approval,
+      {
+        providerContractHash: "provider123",
+        now: attemptedAt,
+      },
+    );
+    assert.deepEqual(reserved.github_action_attempts, [
+      {
+        action: "fork_create",
+        approval_fingerprint: approval.fingerprint,
+        attempted_at: attemptedAt,
+        preview_fingerprint: evidence.action_preview.fingerprint,
+        repository: "example/skill",
+        fork_repository: "example-user/skill",
+      },
+    ]);
+
+    const pending = {
+      schema_version: 1,
+      action: "fork_create",
+      repository: "example/skill",
+      approval_fingerprint: approval.fingerprint,
+      preview_fingerprint: evidence.action_preview.fingerprint,
+      observed_at: new Date(
+        Date.parse(attemptedAt) + 60_000,
+      ).toISOString(),
+      status: "pending",
+      remote_state_hash: "c".repeat(64),
+    };
+    const recorded = recordGithubActionReconciliation(
+      root,
+      "run-001",
+      evidence.action_preview,
+      approval,
+      pending,
+      { providerContractHash: "provider123" },
+    );
+    assert.deepEqual(recorded.github_action_reconciliations, [pending]);
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "fork_creation", {
+          updates: {
+            validation_summary: VALIDATION_SUMMARY,
+            ...actionEvidence("fork_create"),
+          },
+        }),
+      /尚未證明未寫入/u,
+    );
+
+    const blocked = {
+      ...pending,
+      observed_at: new Date(
+        Date.parse(attemptedAt) + 6 * 60_000,
+      ).toISOString(),
+      status: "blocked",
+      remote_state_hash: "e".repeat(64),
+    };
+    const terminal = recordGithubActionReconciliation(
+      root,
+      "run-001",
+      evidence.action_preview,
+      approval,
+      blocked,
+      { providerContractHash: "provider123" },
+    );
+    assert.deepEqual(
+      terminal.github_action_reconciliations,
+      [pending, blocked],
+    );
+    assert.throws(
+      () =>
+        recordGithubActionReconciliation(
+          root,
+          "run-001",
+          evidence.action_preview,
+          approval,
+          {
+            ...blocked,
+            observed_at: new Date(
+              Date.parse(attemptedAt) + 7 * 60_000,
+            ).toISOString(),
+          },
+          { providerContractHash: "provider123" },
+        ),
+      /終止狀態/u,
+    );
   });
 });
 
@@ -569,9 +795,37 @@ test("legacy terminal run migrates before current schema validation", () => {
       "utf8",
     );
     const migrated = readRun(root, "run-001");
-    assert.equal(migrated.schema_version, 5);
+    assert.equal(migrated.schema_version, 6);
     assert.equal(migrated.phase, "completed");
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), migrated);
+  });
+});
+
+test("v5 run migrates to v6 without inventing Fork evidence", () => {
+  withStateRoot((root) => {
+    const path = join(root, "runs", "run-001", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        schema_version: 5,
+        run_id: "run-001",
+        binding_id: "binding-001",
+        phase: "target_selection",
+        status: "active",
+        target: { skill: "example-skill" },
+        approvals: [],
+        consumed_approval_fingerprints: [],
+        attempted_github_action_fingerprints: [],
+        github_action_attempts: [],
+        github_action_reconciliations: [],
+      })}\n`,
+      "utf8",
+    );
+    const migrated = readRun(root, "run-001");
+    assert.equal(migrated.schema_version, 6);
+    assert.equal(migrated.fork_proof, undefined);
+    assert.deepEqual(migrated.github_action_attempts, []);
   });
 });
 

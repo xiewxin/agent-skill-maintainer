@@ -18,6 +18,8 @@ import {
   validateTrackedProcessArtifacts,
 } from "../scripts/validate-publication.mjs";
 import {
+  validateForkForwardAggregate,
+  validateForkForwardFixture,
   validateForwardEvaluationAggregate,
   validateForwardEvaluationFixture,
 } from "../evals/run-evals.mjs";
@@ -232,6 +234,24 @@ function prepareCliBranchPushAction(
     updatesPath,
     `${JSON.stringify({
       validation_summary: fixture.validationSummary,
+      ...(fixture.binding.relationship === "contribute"
+        ? {
+            fork_proof: {
+              schema_version: 1,
+              repository: "example/skill",
+              fork_repository: headRepository,
+              account,
+              relationship: "contribute",
+              base_branch: repository.base_ref,
+              base_commit: repository.merge_base,
+              default_branch_only: true,
+              operation: "reuse",
+              parent_repository: "example/skill",
+              base_commit_available: true,
+              verified: true,
+            },
+          }
+        : {}),
       action_preview: preview,
       approvals: [approval],
     })}\n`,
@@ -260,6 +280,203 @@ function prepareCliBranchPushAction(
   };
 }
 
+/** Prepares one contribute Fork action at the fork_creation lifecycle stage. */
+function prepareCliForkAction(fixture) {
+  const stateRoot = prepareCliValidationRun(fixture);
+  const statePath = resolve(fixture.root, "fork-state.json");
+  const previewPath = resolve(fixture.root, "fork-preview.json");
+  const approvalPath = resolve(fixture.root, "fork-approval.json");
+  const updatesPath = resolve(fixture.root, "fork-updates.json");
+  const repository = fixture.candidateSnapshot.repository_snapshot;
+  const state = {
+    run_id: "run-001",
+    binding_id: "binding-001",
+    account: "contributor",
+    repository: "example/skill",
+    relationship: "contribute",
+    base_branch: repository.base_ref,
+    base_commit: repository.merge_base,
+    head_branch: fixture.branch,
+    head_commit: repository.head_commit,
+    diff_hash: fixture.candidateSnapshot.candidate_diff_hash,
+    action_target: {
+      fork_repository: "contributor/skill",
+      default_branch_only: true,
+      operation: "create",
+    },
+    release_enabled: false,
+    provider_contract_hash: fingerprint(loadProviderProfiles()),
+  };
+  writeFileSync(statePath, `${JSON.stringify(state)}\n`, "utf8");
+  const preview = runMaintainerCommand([
+    "github-preview",
+    "--action",
+    "fork_create",
+    "--state",
+    statePath,
+  ]);
+  writeFileSync(previewPath, `${JSON.stringify(preview)}\n`, "utf8");
+  const now = Date.now();
+  const approval = runMaintainerCommand([
+    "github-approve",
+    "--preview",
+    previewPath,
+    "--confirmed-at",
+    new Date(now - 60_000).toISOString(),
+    "--expires-at",
+    new Date(now + 10 * 60_000).toISOString(),
+  ]);
+  writeFileSync(approvalPath, `${JSON.stringify(approval)}\n`, "utf8");
+  writeFileSync(
+    updatesPath,
+    `${JSON.stringify({
+      validation_summary: fixture.validationSummary,
+      action_preview: preview,
+      approvals: [approval],
+    })}\n`,
+    "utf8",
+  );
+  runMaintainerCommand([
+    "transition",
+    "--state-root",
+    stateRoot,
+    "--run-id",
+    "run-001",
+    "--phase",
+    "fork_creation",
+    "--updates",
+    updatesPath,
+  ]);
+  return {
+    stateRoot,
+    state,
+    statePath,
+    preview,
+    previewPath,
+    approval,
+    approvalPath,
+  };
+}
+
+/** Returns one CLI Fork runner whose destination appears after POST. */
+function cliForkGithubRunner(
+  state,
+  {
+    forkExists = false,
+    appearAfterPost = true,
+    postError = false,
+    forkReadFailureOn = null,
+  } = {},
+) {
+  let exists = forkExists;
+  let postCount = 0;
+  let forkReadCount = 0;
+  const runner = (arguments_) => {
+    if (arguments_[0] === "api" && arguments_[1] === "user") {
+      return { status: 0, stdout: `${state.account}\n`, stderr: "" };
+    }
+    if (
+      arguments_[0] === "repo" &&
+      arguments_[1] === "view" &&
+      arguments_[2] === state.repository
+    ) {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: state.repository,
+          viewerPermission: "READ",
+          defaultBranchRef: { name: state.base_branch },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] ===
+        `repos/${state.repository}/branches/${state.base_branch}`
+    ) {
+      return {
+        status: 0,
+        stdout: `${state.base_commit}\n`,
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "repo" &&
+      arguments_[1] === "view" &&
+      arguments_[2] === state.action_target.fork_repository
+    ) {
+      forkReadCount += 1;
+      if (forkReadCount === forkReadFailureOn) {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "HTTP 503: Service Unavailable",
+        };
+      }
+      if (!exists) {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "HTTP 404: Not Found",
+        };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          nameWithOwner: state.action_target.fork_repository,
+          viewerPermission: "WRITE",
+          parent: { nameWithOwner: state.repository },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] === "--method" &&
+      arguments_[2] === "POST"
+    ) {
+      postCount += 1;
+      if (postError) {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "network result unknown",
+        };
+      }
+      exists = appearAfterPost;
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          full_name: state.action_target.fork_repository,
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      arguments_[0] === "api" &&
+      arguments_[1] ===
+        `repos/${state.action_target.fork_repository}/commits/${state.base_commit}`
+    ) {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ sha: state.base_commit }),
+        stderr: "",
+      };
+    }
+    throw new Error(`unexpected gh call: ${arguments_.join(" ")}`);
+  };
+  return {
+    runner,
+    get postCount() {
+      return postCount;
+    },
+    get forkReadCount() {
+      return forkReadCount;
+    },
+  };
+}
+
 test("required public files and maintainer guidance exist", () => {
   const required = [
     ".gitattributes",
@@ -281,7 +498,9 @@ test("required public files and maintainer guidance exist", () => {
     ".agents/releasing.md",
     ".agents/adr/0001-node-runtime.md",
     ".agents/adr/0002-deterministic-branch-push.md",
+    ".agents/adr/0003-deterministic-fork-creation.md",
     "evals/cases/sample-cleanup-forward.json",
+    "evals/cases/fork-creation-forward.json",
   ];
   assert.deepEqual(
     required.filter((relativePath) => {
@@ -317,6 +536,8 @@ test("README documents Preview, npx installation, and zero-dependency Node runti
     "No `npm install`",
     "github-preview",
     "github-reconcile",
+    "github-fork-verify",
+    "fork_create",
     "branch_push",
     "--candidate",
     "explicit confirmation",
@@ -352,6 +573,7 @@ test("Skill metadata, trigger cases, references, and Preview boundary remain com
   assert.ok(skill.includes("do not substitute manual GitHub commands"));
   assert.ok(skill.includes("local-candidate Preview"));
   assert.ok(skill.includes("state-bound GitHub apply"));
+  assert.ok(skill.includes("personal Fork creation"));
   assert.ok(skill.includes("branch push"));
   assert.ok(skill.includes("explicit expected-value lease"));
   assert.ok(skill.includes("replacement refs and graft files"));
@@ -995,11 +1217,251 @@ test("CLI contributor branch push blocks a missing Fork before Git access", () =
             temporaryRoot: fixture.root,
           },
         ),
-      /不支援自動建立 Fork/u,
+      /請先完成 fork_create/u,
     );
     assert.equal(gitCalls, 0);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("CLI creates one verified personal Fork and records its attempt time", () => {
+  const fixture = createCliBranchPushFixture({
+    relationship: "contribute",
+  });
+  try {
+    const prepared = prepareCliForkAction(fixture);
+    const fake = cliForkGithubRunner(prepared.state);
+    const result = runMaintainerCommand(
+      [
+        "github-apply",
+        "--state-root",
+        prepared.stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        prepared.previewPath,
+        "--approval",
+        prepared.approvalPath,
+      ],
+      { githubRunner: fake.runner },
+    );
+    assert.equal(result.status, "applied");
+    assert.equal(result.proof.operation, "create");
+    assert.equal(result.proof.verified, true);
+    assert.equal(fake.postCount, 1);
+    const active = readRun(prepared.stateRoot, "run-001");
+    assert.equal(active.github_action_attempts.length, 1);
+    assert.equal(
+      active.github_action_attempts[0].action,
+      "fork_create",
+    );
+    assert.ok(
+      Number.isFinite(
+        Date.parse(active.github_action_attempts[0].attempted_at),
+      ),
+    );
+
+    const reuseState = {
+      ...prepared.state,
+      action_target: {
+        ...prepared.state.action_target,
+        operation: "reuse",
+      },
+    };
+    writeFileSync(
+      prepared.statePath,
+      `${JSON.stringify(reuseState)}\n`,
+      "utf8",
+    );
+    const reused = runMaintainerCommand(
+      [
+        "github-fork-verify",
+        "--state",
+        prepared.statePath,
+      ],
+      { githubRunner: fake.runner },
+    );
+    assert.equal(reused.operation, "reuse");
+    assert.equal(reused.verified, true);
+    assert.equal(fake.postCount, 1);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("CLI Fork preflight stays retryable but uncertain POST never replays", () => {
+  const existingFixture = createCliBranchPushFixture({
+    relationship: "contribute",
+  });
+  try {
+    const prepared = prepareCliForkAction(existingFixture);
+    const existing = cliForkGithubRunner(prepared.state, {
+      forkExists: true,
+    });
+    assert.throws(
+      () =>
+        runMaintainerCommand(
+          [
+            "github-apply",
+            "--state-root",
+            prepared.stateRoot,
+            "--run-id",
+            "run-001",
+            "--preview",
+            prepared.previewPath,
+            "--approval",
+            prepared.approvalPath,
+          ],
+          { githubRunner: existing.runner },
+        ),
+      /重新預覽為 reuse/u,
+    );
+    assert.deepEqual(
+      readRun(prepared.stateRoot, "run-001")
+        .github_action_attempts,
+      [],
+    );
+  } finally {
+    rmSync(existingFixture.root, { recursive: true, force: true });
+  }
+
+  const reservedPreflightFixture = createCliBranchPushFixture({
+    relationship: "contribute",
+  });
+  try {
+    const prepared = prepareCliForkAction(reservedPreflightFixture);
+    const failed = cliForkGithubRunner(prepared.state, {
+      forkReadFailureOn: 2,
+    });
+    const result = runMaintainerCommand(
+      [
+        "github-apply",
+        "--state-root",
+        prepared.stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        prepared.previewPath,
+        "--approval",
+        prepared.approvalPath,
+      ],
+      { githubRunner: failed.runner },
+    );
+    assert.equal(failed.forkReadCount, 2);
+    assert.equal(failed.postCount, 0);
+    assert.equal(result.status, "not_applied");
+    assert.equal(
+      readRun(prepared.stateRoot, "run-001")
+        .github_action_reconciliations.at(-1).status,
+      "not_applied",
+    );
+
+    const refreshedApproval = runMaintainerCommand([
+      "github-approve",
+      "--preview",
+      prepared.previewPath,
+      "--confirmed-at",
+      new Date(Date.now() - 30_000).toISOString(),
+      "--expires-at",
+      new Date(Date.now() + 10 * 60_000).toISOString(),
+    ]);
+    const retryUpdatesPath = resolve(
+      reservedPreflightFixture.root,
+      "fork-retry-updates.json",
+    );
+    writeFileSync(
+      retryUpdatesPath,
+      `${JSON.stringify({
+        validation_summary:
+          reservedPreflightFixture.validationSummary,
+        action_preview: prepared.preview,
+        approvals: [refreshedApproval],
+      })}\n`,
+      "utf8",
+    );
+    runMaintainerCommand([
+      "transition",
+      "--state-root",
+      prepared.stateRoot,
+      "--run-id",
+      "run-001",
+      "--phase",
+      "fork_creation",
+      "--updates",
+      retryUpdatesPath,
+    ]);
+    assert.equal(
+      readRun(
+        prepared.stateRoot,
+        "run-001",
+      ).consumed_approval_fingerprints.at(-1),
+      refreshedApproval.fingerprint,
+    );
+  } finally {
+    rmSync(reservedPreflightFixture.root, {
+      recursive: true,
+      force: true,
+    });
+  }
+
+  const uncertainFixture = createCliBranchPushFixture({
+    relationship: "contribute",
+  });
+  try {
+    const prepared = prepareCliForkAction(uncertainFixture);
+    const uncertain = cliForkGithubRunner(prepared.state, {
+      postError: true,
+    });
+    const apply = () =>
+      runMaintainerCommand(
+        [
+          "github-apply",
+          "--state-root",
+          prepared.stateRoot,
+          "--run-id",
+          "run-001",
+          "--preview",
+          prepared.previewPath,
+          "--approval",
+          prepared.approvalPath,
+        ],
+        { githubRunner: uncertain.runner },
+      );
+    const uncertainResult = apply();
+    assert.equal(uncertainResult.status, "pending");
+    assert.equal(
+      readRun(prepared.stateRoot, "run-001")
+        .github_action_reconciliations.at(-1).status,
+      "pending",
+    );
+    assert.equal(uncertain.postCount, 1);
+    assert.throws(apply, /不可重放/u);
+    assert.equal(uncertain.postCount, 1);
+
+    const reconciled = runMaintainerCommand(
+      [
+        "github-reconcile",
+        "--state-root",
+        prepared.stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        prepared.previewPath,
+        "--approval",
+        prepared.approvalPath,
+      ],
+      { githubRunner: uncertain.runner },
+    );
+    assert.equal(reconciled.status, "pending");
+    assert.equal(uncertain.postCount, 1);
+    assert.equal(
+      readRun(prepared.stateRoot, "run-001")
+        .github_action_reconciliations.at(-1).status,
+      "pending",
+    );
+  } finally {
+    rmSync(uncertainFixture.root, { recursive: true, force: true });
   }
 });
 
@@ -1041,6 +1503,8 @@ test("publication, evaluation, and repository validators execute directly", () =
   );
   assert.equal(report.agent_forward_evaluation.candidate_regressions, 0);
   assert.equal(report.platform_validation.passed, true);
+  assert.equal(report.fork_forward_fixture_contract_passed, true);
+  assert.equal(report.fork_forward_evaluation.passed, true);
   assert.deepEqual(
     report.platform_validation.platforms.map((platform) => platform.id).sort(),
     ["claude-code", "codex"],
@@ -1051,6 +1515,10 @@ test("publication, evaluation, and repository validators execute directly", () =
   );
   assert.equal(
     report.release_blockers.includes("platform_validation_pending"),
+    false,
+  );
+  assert.equal(
+    report.release_blockers.includes("fork_forward_evaluation_pending"),
     false,
   );
   assert.deepEqual(report.release_blockers, ["controlled_github_e2e_pending"]);
@@ -1117,6 +1585,38 @@ test("forward fixture keeps positive discovery and negative non-trigger contract
         minimum_defect_findings: 1,
       },
     }),
+    false,
+  );
+});
+
+test("Fork forward fixture and aggregate stay bound to the candidate Skill", () => {
+  const fixture = JSON.parse(
+    read("evals/cases/fork-creation-forward.json"),
+  );
+  assert.equal(validateForkForwardFixture(fixture), true);
+  assert.equal(
+    validateForkForwardFixture({
+      ...fixture,
+      remote_actions_executed: true,
+    }),
+    false,
+  );
+
+  const aggregate = JSON.parse(
+    read("evals/evidence/fork-creation-preview.json"),
+  );
+  const currentSkillFingerprint =
+    aggregate.candidate_skill_fingerprint;
+  assert.equal(
+    validateForkForwardAggregate(aggregate, {
+      currentSkillFingerprint,
+    }).passed,
+    true,
+  );
+  assert.equal(
+    validateForkForwardAggregate(aggregate, {
+      currentSkillFingerprint: "f".repeat(64),
+    }).passed,
     false,
   );
 });

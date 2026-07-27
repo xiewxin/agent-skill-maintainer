@@ -25,6 +25,7 @@ import {
   validateBranchPushProofContract,
   validateCandidateSnapshotContract,
   validateDocument,
+  validateForkProofContract,
   validatePrProofContract,
   validatePrReadyValidation,
 } from "./core.mjs";
@@ -52,6 +53,7 @@ const TERMINAL_PHASES = new Set(["aborted", "blocked", "completed"]);
 const INTERRUPTION_PHASES = new Set(["aborted", "blocked"]);
 const CONSUMED_ACTION_PHASES = new Set([
   "isolation",
+  "fork_creation",
   "branch_push",
   "pr_creation",
   "pr_update",
@@ -60,6 +62,7 @@ const CONSUMED_ACTION_PHASES = new Set([
   "local_update",
 ]);
 const GITHUB_ACTION_PHASES = Object.freeze({
+  fork_create: "fork_creation",
   branch_push: "branch_push",
   pr_create: "pr_creation",
   pr_update: "pr_update",
@@ -81,7 +84,16 @@ const NEXT_PHASES = Object.freeze({
   optimization_approval: new Set(["isolation"]),
   isolation: new Set(["implementation"]),
   implementation: new Set(["validation", "optimization_approval"]),
-  validation: new Set(["branch_push", "optimization_approval"]),
+  validation: new Set([
+    "fork_creation",
+    "branch_push",
+    "optimization_approval",
+  ]),
+  fork_creation: new Set([
+    "fork_creation",
+    "branch_push",
+    "optimization_approval",
+  ]),
   branch_push: new Set([
     "branch_push",
     "pr_creation",
@@ -137,9 +149,15 @@ const PHASE_UPDATE_FIELDS = Object.freeze({
   isolation: new Set(["approvals", "repository_snapshot"]),
   implementation: new Set(),
   validation: new Set(["candidate_snapshot"]),
+  fork_creation: new Set([
+    "action_preview",
+    "approvals",
+    "validation_summary",
+  ]),
   branch_push: new Set([
     "action_preview",
     "approvals",
+    "fork_proof",
     "validation_summary",
   ]),
   pr_creation: new Set([
@@ -252,7 +270,7 @@ function migrateRunDocument(document) {
   if (!Number.isInteger(document.schema_version)) {
     throw new Error("run state schema_version 不合法");
   }
-  if (document.schema_version === 5) {
+  if (document.schema_version === 6) {
     return {
       document: clone(document),
       migrated: false,
@@ -260,7 +278,9 @@ function migrateRunDocument(document) {
   }
   let current;
   let migrated = true;
-  if (document.schema_version === 4) {
+  if (document.schema_version === 5) {
+    current = clone(document);
+  } else if (document.schema_version === 4) {
     current = clone(document);
   } else if (document.schema_version === 3) {
     current = clone(document);
@@ -315,6 +335,7 @@ function migrateRunDocument(document) {
     migrated = true;
   }
   if (
+    document.schema_version <= 4 &&
     current.status === "active" &&
     ["pr_creation", "pr_update", "merge", "release", "local_update"].includes(
       current.phase,
@@ -325,7 +346,7 @@ function migrateRunDocument(document) {
         "請使用原版本完成 reconcile，或建立新 run",
     );
   }
-  current.schema_version = 5;
+  current.schema_version = 6;
   return {
     document: current,
     migrated,
@@ -343,7 +364,7 @@ export function createRun(
     throw new Error(`run 已存在：${runId}`);
   }
   const document = {
-    schema_version: 5,
+    schema_version: 6,
     run_id: runId,
     binding_id: safeBindingId,
     phase: "target_selection",
@@ -380,6 +401,19 @@ export function readRun(stateRoot, runId) {
   validateDocument("run-state", document);
   for (const reconciliation of document.github_action_reconciliations) {
     validateDocument("github-action-reconciliation", reconciliation);
+  }
+  for (const attempt of document.github_action_attempts) {
+    if (
+      attempt.action === "fork_create" &&
+      (
+        !Number.isFinite(Date.parse(attempt.attempted_at)) ||
+        attempt.preview_fingerprint === undefined ||
+        attempt.repository !== document.target?.repository ||
+        attempt.fork_repository === undefined
+      )
+    ) {
+      throw new Error("fork_create attempt 缺少綁定的執行資訊");
+    }
   }
   if (migrated) {
     atomicWriteJson(path, document);
@@ -509,10 +543,26 @@ export function reserveGithubActionApply(
     document.attempted_github_action_fingerprints.push(
       approval.fingerprint,
     );
-    document.github_action_attempts.push({
+    const attempt = {
       action: preview.action,
       approval_fingerprint: approval.fingerprint,
-    });
+    };
+    if (preview.action === "fork_create") {
+      const attemptedAt = now instanceof Date
+        ? now.toISOString()
+        : new Date(now).toISOString();
+      if (!Number.isFinite(Date.parse(attemptedAt))) {
+        throw new InvalidStateTransition(
+          "fork_create attempt 時間不合法",
+        );
+      }
+      attempt.attempted_at = attemptedAt;
+      attempt.preview_fingerprint = preview.fingerprint;
+      attempt.repository = preview.state.repository;
+      attempt.fork_repository =
+        preview.state.action_target.fork_repository;
+    }
+    document.github_action_attempts.push(attempt);
     validateDocument("run-state", document);
     atomicWriteJson(runPath(root, runId), document);
     return clone(document);
@@ -540,7 +590,7 @@ export function authorizeGithubActionReconcile(
   });
 }
 
-/** Records a verified not-applied result that may authorize a fresh attempt. */
+/** Records one verified read-only reconciliation for a prior attempt. */
 export function recordGithubActionReconciliation(
   stateRoot,
   runId,
@@ -571,15 +621,25 @@ export function recordGithubActionReconciliation(
     }
     const existing = document.github_action_reconciliations.find(
       (item) =>
-        item.approval_fingerprint === approval.fingerprint,
+        item.approval_fingerprint === approval.fingerprint &&
+        canonicalJson(item) === canonicalJson(reconciliation),
     );
     if (existing !== undefined) {
-      if (canonicalJson(existing) !== canonicalJson(reconciliation)) {
-        throw new InvalidStateTransition(
-          "GitHub reconciliation 結果已漂移",
-        );
-      }
       return clone(document);
+    }
+    const latest = document.github_action_reconciliations
+      .filter(
+        (item) =>
+          item.approval_fingerprint === approval.fingerprint,
+      )
+      .at(-1);
+    if (
+      latest !== undefined &&
+      ["blocked", "drifted"].includes(latest.status)
+    ) {
+      throw new InvalidStateTransition(
+        "GitHub reconciliation 已進入終止狀態",
+      );
     }
     document.github_action_reconciliations.push(clone(reconciliation));
     validateDocument("run-state", document);
@@ -830,6 +890,28 @@ function requirePhaseEvidence(document, nextPhase) {
   if (nextPhase === "validation") {
     validateRunCandidate(document);
   }
+  if (nextPhase === "fork_creation") {
+    const candidate = validateRunCandidate(document);
+    validatePrReadyValidation(document.validation_summary, candidate);
+    requireActionApproval(
+      document,
+      "fork_create",
+      {
+        expectedHeadCommit:
+          candidate.repository_snapshot.head_commit,
+        expectedDiffHash: candidate.candidate_diff_hash,
+        expectedBaseBranch:
+          candidate.repository_snapshot.base_ref,
+      },
+    );
+    if (
+      document.action_preview.state.relationship !== "contribute"
+    ) {
+      throw new InvalidStateTransition(
+        "fork_creation 只適用於 contribute 關係",
+      );
+    }
+  }
   if (nextPhase === "branch_push") {
     const candidate = validateRunCandidate(document);
     validatePrReadyValidation(document.validation_summary, candidate);
@@ -843,6 +925,19 @@ function requirePhaseEvidence(document, nextPhase) {
         expectedBaseBranch: candidate.repository_snapshot.base_ref,
       },
     );
+    if (
+      document.action_preview.state.relationship === "contribute"
+    ) {
+      const target =
+        document.action_preview.state.action_target;
+      validateForkProofContract(document.fork_proof, {
+        repository: document.target.repository,
+        forkRepository: target.head_repository,
+        account: document.action_preview.state.account,
+        baseBranch: candidate.repository_snapshot.base_ref,
+        baseCommit: candidate.repository_snapshot.merge_base,
+      });
+    }
   }
   if (["pr_creation", "pr_update"].includes(nextPhase)) {
     const candidate = validateRunCandidate(document);

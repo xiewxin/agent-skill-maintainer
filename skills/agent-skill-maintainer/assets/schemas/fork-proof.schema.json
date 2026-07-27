@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/fork-proof.schema.json",
+  "title": "Verified GitHub Fork Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "fork_repository",
+    "account",
+    "relationship",
+    "base_branch",
+    "base_commit",
+    "default_branch_only",
+    "operation",
+    "parent_repository",
+    "base_commit_available",
+    "verified"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "minLength": 1},
+    "fork_repository": {"type": "string", "minLength": 1},
+    "account": {"type": "string", "minLength": 1},
+    "relationship": {"type": "string", "const": "contribute"},
+    "base_branch": {"type": "string", "minLength": 1},
+    "base_commit": {"type": "string", "minLength": 1},
+    "default_branch_only": {"type": "boolean", "const": true},
+    "operation": {"type": "string", "enum": ["create", "reuse"]},
+    "parent_repository": {"type": "string", "minLength": 1},
+    "base_commit_available": {"type": "boolean", "const": true},
+    "verified": {"type": "boolean", "const": true}
+  }
+}

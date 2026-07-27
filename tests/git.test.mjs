@@ -1194,7 +1194,7 @@ test("contributor branch push blocks a missing or unrelated fork before Git acce
           candidatePath: fixture.candidate,
           candidateSnapshot: fixture.candidateSnapshot,
         }),
-      /不支援自動建立 Fork/u,
+      /請先完成 fork_create 或既有 Fork 驗證/u,
     );
     assert.equal(gitCalls, 0);
     assert.throws(
@@ -1211,7 +1211,7 @@ test("contributor branch push blocks a missing or unrelated fork before Git acce
           candidatePath: fixture.candidate,
           candidateSnapshot: fixture.candidateSnapshot,
         }),
-      /owner、parent 或寫入權限/u,
+      /Fork parent/u,
     );
     assert.equal(gitCalls, 0);
     assert.throws(
