@@ -587,6 +587,7 @@ test("Skill metadata, trigger cases, references, and stable boundary remain comp
   assert.ok(skill.includes("explicit confirmation"));
   assert.ok(skill.includes("`FB-001`"));
   assert.ok(skill.includes("`OPT-001`"));
+  assert.ok(skill.includes("target-intent map"));
   assert.ok(skill.includes("Never mark an `OPT-*` as `accepted`"));
 
   const references = [
@@ -609,6 +610,23 @@ test("Skill metadata, trigger cases, references, and stable boundary remain comp
   );
   assert.ok(evidenceContract.includes("Do not create an `OPT-*`"));
   assert.ok(evidenceContract.includes("three or more digits"));
+  for (const phrase of [
+    "## Target-intent map",
+    "explicit non-goals",
+    "cannot override a verified target decision",
+    "## Skill structure-quality lens",
+    "invocation precision",
+    "checkable completion",
+    "progressive disclosure",
+    "single ownership",
+    "no-op, sprawl, and sediment",
+    "does not justify an `OPT-*` by itself",
+  ]) {
+    assert.ok(
+      evidenceContract.includes(phrase),
+      `evidence contract missing: ${phrase}`,
+    );
+  }
   const documentation = read(
     "skills/agent-skill-maintainer/references/agent-documentation.md",
   );
@@ -1508,7 +1526,7 @@ test("publication, evaluation, and repository validators execute directly", () =
   );
   assert.equal(
     report.agent_forward_evaluation.candidate_passed_behaviors,
-    6,
+    8,
   );
   assert.equal(report.agent_forward_evaluation.candidate_regressions, 0);
   assert.equal(report.platform_validation.passed, true);
@@ -1601,6 +1619,21 @@ test("forward fixture keeps positive discovery and negative non-trigger contract
     read("evals/cases/sample-cleanup-forward.json"),
   );
   assert.equal(validateForwardEvaluationFixture(fixture), true);
+  assert.ok(
+    fixture.required_behaviors.includes("target-intent-preserved"),
+  );
+  assert.ok(
+    fixture.required_behaviors.includes("structure-finding-evidence-bound"),
+  );
+  assert.equal(fixture.positive_expectations.target_decision_read, true);
+  assert.equal(
+    fixture.positive_expectations.automatic_release_not_proposed,
+    true,
+  );
+  assert.equal(
+    fixture.positive_expectations.untestable_completion_identified,
+    true,
+  );
   assert.equal(
     validateForwardEvaluationFixture({
       ...fixture,

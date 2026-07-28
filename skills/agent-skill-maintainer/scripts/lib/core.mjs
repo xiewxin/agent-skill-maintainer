@@ -1163,6 +1163,22 @@ export function validateProviderValidationAggregate(
   if (!Number.isFinite(Date.parse(aggregate.evaluated_at))) {
     addBlocker("provider_evaluation_time_invalid");
   }
+  if (!Number.isFinite(Date.parse(aggregate.case_measurements_evaluated_at))) {
+    addBlocker("provider_case_measurement_time_invalid");
+  }
+  if (!Number.isFinite(Date.parse(aggregate.candidate_bridge_evaluated_at))) {
+    addBlocker("provider_candidate_bridge_time_invalid");
+  }
+  if (
+    Date.parse(aggregate.case_measurements_evaluated_at) >
+      Date.parse(aggregate.evaluated_at) ||
+    Date.parse(aggregate.candidate_bridge_evaluated_at) >
+      Date.parse(aggregate.evaluated_at) ||
+    Date.parse(aggregate.case_measurements_evaluated_at) >
+      Date.parse(aggregate.candidate_bridge_evaluated_at)
+  ) {
+    addBlocker("provider_evidence_time_inconsistent");
+  }
   if (
     aggregate.raw_outputs_published !== false ||
     aggregate.local_installations_modified !== false

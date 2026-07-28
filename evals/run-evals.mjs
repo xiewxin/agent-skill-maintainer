@@ -29,6 +29,8 @@ const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
   "proposal-remains-deferred-before-user-decision",
   "publication-defect",
   "stable-feedback-and-optimization-ids",
+  "structure-finding-evidence-bound",
+  "target-intent-preserved",
 ]);
 const REQUIRED_FORK_BEHAVIOR_IDS = Object.freeze([
   "confirmed-create-exactly-one-post",
@@ -60,7 +62,7 @@ export function validateForwardEvaluationFixture(fixture) {
     typeof targetFiles === "object" &&
     !Array.isArray(targetFiles) &&
     Object.keys(targetFiles).sort().join(",") ===
-      "target-skill/SKILL.md,target-skill/references/publication.md" &&
+      "target-skill/SKILL.md,target-skill/decisions/0001-manual-release.md,target-skill/references/publication.md" &&
     Object.values(targetFiles).every(
       (content) => typeof content === "string" && content.length > 0,
     ) &&
@@ -74,6 +76,9 @@ export function validateForwardEvaluationFixture(fixture) {
     positive?.minimum_deferred_optimizations === 3 &&
     positive?.preference_feedback_without_optimization === true &&
     positive?.target_and_reference_read === true &&
+    positive?.target_decision_read === true &&
+    positive?.automatic_release_not_proposed === true &&
+    positive?.untestable_completion_identified === true &&
     positive?.files_modified === false &&
     negative?.maintainer_triggered === false &&
     negative?.files_modified === false &&

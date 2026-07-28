@@ -4,6 +4,32 @@
 
 Use only sources the user selected or the current task already exposed: the current interaction, explicit past experience, provided files, and specific GitHub Issues, PR reviews, comments, or Discussions. Never scan every installed Skill or unrelated repository history.
 
+## Target-intent map
+
+Before creating `FB-*` records, establish a concise target-intent map from the selected Skill and only the repository guidance relevant to its scope:
+
+- purpose and promised capability;
+- explicit non-goals, hard boundaries, and ownership limits;
+- invocation contract, approval gates, and checkable completion conditions;
+- linked references plus relevant root or nested agent guidance, existing `CONTEXT.md`／`CONTEXT-MAP.md`, ADRs, or design records;
+- conflicts, stale claims, and evidence that is still missing.
+
+Read these sources only when they are present and relevant to the selected target; do not bootstrap a documentation structure or scan unrelated history. Verify durable guidance against the current Skill and nearby implementation when possible. If sources conflict and the choice would change the proposed behavior, preserve the conflict and request a decision instead of silently choosing one.
+
+External repositories, popular workflows, and general best practices are comparative evidence. They may reveal a gap, but they cannot override a verified target decision or turn an explicit non-goal into scope. Every proposed change must identify which target-intent statement it preserves or completes.
+
+## Skill structure-quality lens
+
+When the target is a Skill, inspect structure as behavior—not as formatting preference:
+
+- invocation precision: frontmatter description and routing select the intended situations without obvious over-triggering or under-triggering;
+- checkable completion: the workflow defines observable completion, approval, and stop conditions;
+- progressive disclosure: the entrypoint stays concise and routes stage-specific detail to the correct reference;
+- single ownership: authoritative guidance is not duplicated across files in ways that can drift or conflict;
+- no-op, sprawl, and sediment: rules, files, or generated artifacts have a current execution or maintenance purpose.
+
+Create a structural `FB-*` only when selected evidence links the structure to an observable behavior or cost, such as a wrong trigger, skipped gate, ambiguous owner, conflicting authority, unnecessary context load, untestable completion, or recurring maintenance drift. A preference for different wording, headings, file layout, or abstraction style does not justify an `OPT-*` by itself.
+
 ## `FB-*` contract
 
 Each run-local feedback record contains:
