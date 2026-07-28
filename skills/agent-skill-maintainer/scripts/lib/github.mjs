@@ -27,6 +27,7 @@ import {
 const ACTIONS = new Set([
   "fork_create",
   "branch_push",
+  "publish_pr",
   "pr_create",
   "pr_update",
   "merge",
@@ -44,7 +45,7 @@ const STATE_FIELDS = Object.freeze([
   "head_commit",
   "diff_hash",
   "action_target",
-  "release_enabled",
+  "capability_proof",
   "provider_contract_hash",
 ]);
 const ACCOUNT_PATTERN =
@@ -100,6 +101,120 @@ function runGithub(runner, arguments_, options = {}) {
     throw new Error(`GitHub CLI 執行失敗：${summary}`);
   }
   return result.stdout.trim();
+}
+
+/** Builds a fingerprinted capability proof from read-only GitHub evidence. */
+export function buildGithubCapabilityProof({
+  account,
+  repository,
+  permission,
+  defaultBranch,
+  immutableReleases,
+  inspectedAt,
+}) {
+  if (
+    typeof account !== "string" ||
+    !ACCOUNT_PATTERN.test(account) ||
+    typeof repository !== "string" ||
+    !REPOSITORY_PATTERN.test(repository) ||
+    !["READ", "TRIAGE", "WRITE", "MAINTAIN", "ADMIN"].includes(permission) ||
+    typeof defaultBranch !== "string" ||
+    defaultBranch.length === 0 ||
+    typeof immutableReleases !== "boolean" ||
+    !Number.isFinite(Date.parse(inspectedAt))
+  ) {
+    throw new Error("GitHub capability evidence 格式不合法");
+  }
+  const relationship = MANAGED_PERMISSIONS.has(permission)
+    ? "managed"
+    : "contribute";
+  const proof = {
+    schema_version: 1,
+    account,
+    repository,
+    permission,
+    default_branch: defaultBranch,
+    relationship,
+    immutable_releases: immutableReleases,
+    release_enabled:
+      relationship === "managed" && immutableReleases === true,
+    inspected_at: new Date(Date.parse(inspectedAt)).toISOString(),
+  };
+  proof.fingerprint = fingerprint(proof);
+  validateDocument("github-capability-proof", proof);
+  return proof;
+}
+
+/** Inspects repository relationship and Release capability without writes. */
+export function inspectGithubRepositoryCapabilities(
+  repository,
+  {
+    runner = defaultRunner,
+    now = new Date(),
+  } = {},
+) {
+  if (
+    typeof repository !== "string" ||
+    !REPOSITORY_PATTERN.test(repository)
+  ) {
+    throw new Error("GitHub repository 格式不合法");
+  }
+  const account = runGithub(runner, ["api", "user", "--jq", ".login"]);
+  const observed = parseGithubJson(
+    runGithub(runner, [
+      "repo",
+      "view",
+      repository,
+      "--json",
+      "nameWithOwner,viewerPermission,defaultBranchRef",
+    ]),
+    "GitHub repository capability",
+  );
+  if (
+    observed.nameWithOwner?.toLowerCase() !== repository.toLowerCase() ||
+    typeof observed.defaultBranchRef?.name !== "string"
+  ) {
+    throw new ApprovalDriftError(
+      "GitHub repository capability identity 不一致",
+    );
+  }
+  const immutability = parseGithubJson(
+    runGithub(runner, [
+      "api",
+      `repos/${repository}/immutable-releases`,
+    ]),
+    "GitHub Release immutability",
+  );
+  const inspectedAt = now instanceof Date
+    ? now.toISOString()
+    : new Date(now).toISOString();
+  return buildGithubCapabilityProof({
+    account,
+    repository: observed.nameWithOwner,
+    permission: observed.viewerPermission,
+    defaultBranch: observed.defaultBranchRef.name,
+    immutableReleases: immutability.enabled === true,
+    inspectedAt,
+  });
+}
+
+/** Verifies proof integrity without trusting caller-derived booleans. */
+function validateCapabilityProof(proof) {
+  validateDocument("github-capability-proof", proof);
+  const current = buildGithubCapabilityProof({
+    account: proof.account,
+    repository: proof.repository,
+    permission: proof.permission,
+    defaultBranch: proof.default_branch,
+    immutableReleases: proof.immutable_releases,
+    inspectedAt: proof.inspected_at,
+  });
+  if (canonicalJson(current) !== canonicalJson(proof)) {
+    throw new ApprovalDriftError(
+      "GitHub capability proof fingerprint 不一致",
+    );
+  }
+  return proof;
 }
 
 /** Classifies one attempted Fork POST without exposing an unredacted error. */
@@ -168,12 +283,22 @@ function branchPushTarget(preview) {
     "expected_remote_commit",
     "head_repository",
     "operation",
+    ...(preview.action === "publish_pr"
+      ? ["title", "body", "draft"]
+      : []),
   ];
   const unknown = Object.keys(target)
     .filter((name) => !expectedFields.includes(name))
     .sort();
   if (unknown.length > 0) {
     throw new Error(`branch push target 含未知欄位：${unknown.join(", ")}`);
+  }
+  if (preview.action === "publish_pr") {
+    textField(target, "title");
+    textField(target, "body", { allowEmpty: true });
+    if (typeof target.draft !== "boolean") {
+      throw new Error("action_target.draft 必須是 boolean");
+    }
   }
   return {
     candidatePathFingerprint: target.candidate_path_fingerprint,
@@ -295,8 +420,8 @@ export function validateBranchPushLocalState(
   candidatePath,
   candidateSnapshot,
 ) {
-  if (preview.action !== "branch_push") {
-    throw new Error("只有 branch_push 需要 candidate preflight");
+  if (!["branch_push", "publish_pr"].includes(preview.action)) {
+    throw new Error("只有 branch_push 或 publish_pr 需要 candidate preflight");
   }
   const target = branchPushTarget(preview);
   if (
@@ -502,7 +627,7 @@ function pullRequestNumber(target) {
 function buildMutationArguments(preview) {
   const { action, state } = preview;
   const target = state.action_target;
-  if (action === "pr_create") {
+  if (["pr_create", "publish_pr"].includes(action)) {
     const headRepository = headRepositoryForPreview(preview);
     if (typeof target.draft !== "boolean") {
       throw new Error("action_target.draft 必須是 boolean");
@@ -641,7 +766,7 @@ function buildActionReconciliationResult(
     ? now.toISOString()
     : new Date(now).toISOString();
   if (
-    !["not_applied", "pending", "blocked", "drifted"].includes(status)
+    !["not_applied", "partial", "pending", "blocked", "drifted"].includes(status)
   ) {
     throw new Error("GitHub reconcile status 不合法");
   }
@@ -664,13 +789,18 @@ function buildActionReconciliationResult(
   };
   if (status === "pending") {
     result.guidance =
-      "稍後執行唯讀 github-reconcile；不得重送 Fork 建立 POST";
+      preview.action === "publish_pr"
+        ? "分支已驗證推送，但 PR 尚不可觀察；稍後唯讀 reconcile，不得重放複合動作或建立新 PR"
+        : "稍後執行唯讀 github-reconcile；不得重送 Fork 建立 POST";
   } else if (status === "blocked") {
     result.guidance =
       "需要人工調查阻擋原因；不得重送 Fork 建立 POST";
   } else if (status === "drifted") {
     result.guidance =
       "重新確認帳號、上游與目的地關係；不得沿用目前預覽";
+  } else if (status === "partial") {
+    result.guidance =
+      "分支已驗證推送且唯讀核對已證明 PR 不存在；可另行確認 pr_create 補完，不得重放複合動作";
   }
   if (status === "not_applied") {
     result.absence_proof = reconciliation;
@@ -794,7 +924,7 @@ function buildOpenPullRequestProof(
     throw new Error("Pull Request apply 缺少 documentation impact");
   }
   let number = preview.state.action_target.pr_number;
-  if (preview.action === "pr_create") {
+  if (["pr_create", "publish_pr"].includes(preview.action)) {
     const match = output.match(/\/pull\/(?<number>[1-9][0-9]*)$/u);
     number = Number(match?.groups?.number);
   }
@@ -821,11 +951,11 @@ function buildOpenPullRequestProof(
     pullRequest.title !== preview.state.action_target.title ||
     pullRequest.body !== preview.state.action_target.body ||
     (
-      preview.action === "pr_create" &&
+      ["pr_create", "publish_pr"].includes(preview.action) &&
       pullRequest.isDraft !== preview.state.action_target.draft
     ) ||
     (
-      preview.action === "pr_create" &&
+      ["pr_create", "publish_pr"].includes(preview.action) &&
       pullRequest.url !== output
     )
   ) {
@@ -870,7 +1000,7 @@ function verifyOpenPullRequest(
   runner,
   documentationImpact,
 ) {
-  const number = preview.action === "pr_create"
+  const number = ["pr_create", "publish_pr"].includes(preview.action)
     ? Number(output.match(/\/pull\/(?<number>[1-9][0-9]*)$/u)?.groups?.number)
     : preview.state.action_target.pr_number;
   if (!Number.isInteger(number) || number <= 0) {
@@ -1079,8 +1209,14 @@ export function inspectGithubActionState(
   if (canonicalJson(current) !== canonicalJson(preview)) {
     throw new ApprovalDriftError("GitHub 動作預覽 fingerprint 已漂移");
   }
+  const capability = validateCapabilityProof(
+    preview.state.capability_proof,
+  );
   const account = runGithub(runner, ["api", "user", "--jq", ".login"]);
-  if (account !== preview.state.account) {
+  if (
+    account !== preview.state.account ||
+    account !== capability.account
+  ) {
     throw new ApprovalDriftError(
       `GitHub active account 已改變：預期 ${preview.state.account}`,
     );
@@ -1098,7 +1234,10 @@ export function inspectGithubActionState(
   if (
     repository.nameWithOwner?.toLowerCase() !==
       preview.state.repository.toLowerCase() ||
-    repository.defaultBranchRef?.name !== preview.state.base_branch
+    repository.defaultBranchRef?.name !== preview.state.base_branch ||
+    repository.nameWithOwner?.toLowerCase() !==
+      capability.repository.toLowerCase() ||
+    repository.defaultBranchRef?.name !== capability.default_branch
   ) {
     throw new ApprovalDriftError("GitHub repository 或 base branch 已漂移");
   }
@@ -1114,6 +1253,11 @@ export function inspectGithubActionState(
   ) {
     throw new ApprovalDriftError(
       "GitHub repository 關係已由 contribute 漂移為 managed",
+    );
+  }
+  if (repository.viewerPermission !== capability.permission) {
+    throw new ApprovalDriftError(
+      "GitHub repository permission 與 capability proof 不一致",
     );
   }
   if (preview.action === "fork_create") {
@@ -1141,7 +1285,7 @@ export function inspectGithubActionState(
     }
   }
   if (
-    preview.action === "branch_push" &&
+    ["branch_push", "publish_pr"].includes(preview.action) &&
     preview.state.relationship === "contribute"
   ) {
     const headRepository = headRepositoryForPreview(preview);
@@ -1350,26 +1494,32 @@ function normalizePreview(action, state) {
   if (!isObject(state.action_target) || Object.keys(state.action_target).length === 0) {
     throw new Error("action_target 必須是非空 object");
   }
-  if (typeof state.release_enabled !== "boolean") {
-    throw new Error("release_enabled 必須是 boolean");
+  const capability = validateCapabilityProof(state.capability_proof);
+  if (
+    capability.account !== state.account ||
+    capability.repository.toLowerCase() !== state.repository.toLowerCase() ||
+    capability.default_branch !== state.base_branch ||
+    capability.relationship !== state.relationship
+  ) {
+    throw new Error("GitHub capability proof 與 action state 不一致");
   }
   if (state.relationship === "analyze-only") {
     throw new Error("analyze-only 不可建立 GitHub 寫入預覽");
   }
-  if (["pr_create", "pr_update"].includes(action)) {
+  if (["pr_create", "publish_pr", "pr_update"].includes(action)) {
     headRepositoryForPreview({ state });
   }
   if (action === "fork_create") {
     forkTarget({ action, state });
   }
-  if (action === "branch_push") {
+  if (["branch_push", "publish_pr"].includes(action)) {
     branchPushTarget({ action, state });
   }
   if (["merge", "release"].includes(action) && state.relationship !== "managed") {
     throw new Error("只有 managed 倉庫可合併或發布");
   }
-  if (action === "release" && state.release_enabled !== true) {
-    throw new Error("release_enabled=false，不可建立發布預覽");
+  if (action === "release" && capability.release_enabled !== true) {
+    throw new Error("GitHub capability proof 不允許建立發布預覽");
   }
   if (action === "release") {
     if (
@@ -1457,7 +1607,7 @@ export function buildGithubActionApproval(
     head_commit: state.head_commit,
     diff_hash: state.diff_hash,
     action_target_hash: fingerprint(state.action_target),
-    release_enabled: state.release_enabled,
+    capability_fingerprint: state.capability_proof.fingerprint,
     provider_contract_hash: state.provider_contract_hash,
     confirmed_at: new Date(confirmed).toISOString(),
     expires_at: new Date(expires).toISOString(),
@@ -1590,6 +1740,182 @@ function applyBranchPush(
     repository: preview.state.repository,
     proof,
   };
+}
+
+/** Projects the Pull Request half of one compound publish preview. */
+function publishPrPullRequestPreview(preview) {
+  if (preview.action !== "publish_pr") {
+    throw new Error("只有 publish_pr 可建立 PR 子預覽");
+  }
+  const target = preview.state.action_target;
+  return buildGithubActionPreview("pr_create", {
+    ...clone(preview.state),
+    action_target: {
+      head_repository: target.head_repository,
+      title: target.title,
+      body: target.body,
+      draft: target.draft,
+    },
+  });
+}
+
+/** Builds the proof for a fully applied or push-only compound action. */
+function buildPublishPrProof(
+  preview,
+  branchPushProof,
+  prProof = null,
+) {
+  validateDocument("branch-push-proof", branchPushProof);
+  if (prProof !== null) {
+    validateDocument("pr-proof", prProof);
+  }
+  const proof = {
+    schema_version: 1,
+    repository: preview.state.repository,
+    status: prProof === null ? "partial" : "applied",
+    branch_push_proof: clone(branchPushProof),
+    pr_proof: prProof === null ? null : clone(prProof),
+    verified: true,
+  };
+  validateDocument("publish-pr-proof", proof);
+  return proof;
+}
+
+/** Returns a non-replayable partial result after the branch is verified. */
+function buildPublishPrPartialResult(
+  preview,
+  approval,
+  branchPushProof,
+  remoteState,
+  status,
+  now,
+) {
+  const result = buildActionReconciliationResult(
+    preview,
+    approval.fingerprint,
+    remoteState,
+    status,
+    now,
+  );
+  result.proof = buildPublishPrProof(
+    preview,
+    branchPushProof,
+    null,
+  );
+  return result;
+}
+
+/** Pushes the exact branch, then creates the exact Pull Request once. */
+function applyPublishPr(
+  preview,
+  approval,
+  {
+    runner,
+    gitRunner,
+    candidatePath,
+    candidateSnapshot,
+    temporaryRoot,
+    documentationImpact,
+    now,
+  },
+) {
+  const pushed = applyBranchPush(preview, {
+    runner,
+    gitRunner,
+    candidatePath,
+    candidateSnapshot,
+    temporaryRoot,
+  });
+  const prPreview = publishPrPullRequestPreview(preview);
+  try {
+    inspectGithubActionState(prPreview, { runner });
+    const output = runGithub(
+      runner,
+      buildMutationArguments(prPreview),
+    );
+    if (!/^https:\/\/github\.com\/[^\s]+$/u.test(output)) {
+      throw new Error(
+        "publish_pr 的 pr_create 未回傳可驗證 GitHub URL",
+      );
+    }
+    const prProof = verifyOpenPullRequest(
+      prPreview,
+      output,
+      runner,
+      documentationImpact,
+    );
+    return {
+      action: "publish_pr",
+      repository: preview.state.repository,
+      status: "applied",
+      url: output,
+      proof: buildPublishPrProof(
+        preview,
+        pushed.proof,
+        prProof,
+      ),
+    };
+  } catch (error) {
+    let reconciled;
+    try {
+      reconciled = reconcileCreatedPullRequest(
+        prPreview,
+        runner,
+        documentationImpact,
+      );
+    } catch (reconcileError) {
+      const pending = buildPublishPrPartialResult(
+        preview,
+        approval,
+        pushed.proof,
+        {
+          head_repository: pushed.proof.head_repository,
+          branch: pushed.proof.branch,
+          commit: pushed.proof.commit,
+          pr_condition: "unobservable",
+        },
+        "pending",
+        now,
+      );
+      pending.reason = redactText(
+        reconcileError instanceof Error
+          ? reconcileError.message
+          : "Pull Request 核對結果不確定",
+      );
+      return pending;
+    }
+    if (reconciled.status === "applied") {
+      return {
+        action: "publish_pr",
+        repository: preview.state.repository,
+        status: "applied",
+        proof: buildPublishPrProof(
+          preview,
+          pushed.proof,
+          reconciled.proof,
+        ),
+      };
+    }
+    const partial = buildPublishPrPartialResult(
+      preview,
+      approval,
+      pushed.proof,
+      {
+        head_repository: pushed.proof.head_repository,
+        branch: pushed.proof.branch,
+        commit: pushed.proof.commit,
+        pr_condition: "absent",
+      },
+      "partial",
+      now,
+    );
+    partial.reason = redactText(
+      error instanceof Error
+        ? error.message
+        : "Pull Request 建立結果不確定",
+    );
+    return partial;
+  }
 }
 
 /** Applies or reuses one exact personal Fork without cloning it locally. */
@@ -1740,6 +2066,17 @@ export function applyGithubAction(
       temporaryRoot,
     });
   }
+  if (preview.action === "publish_pr") {
+    return applyPublishPr(preview, approval, {
+      runner,
+      gitRunner,
+      candidatePath,
+      candidateSnapshot,
+      temporaryRoot,
+      documentationImpact,
+      now,
+    });
+  }
   const arguments_ = buildMutationArguments(preview);
   inspectGithubActionState(preview, { runner });
   const output = runGithub(runner, arguments_);
@@ -1840,6 +2177,78 @@ export function reconcileGithubAction(
         },
         status,
         now,
+      );
+    }
+  } else if (preview.action === "publish_pr") {
+    inspectGithubActionState(preview, {
+      runner,
+      allowBaseCommitDrift: true,
+    });
+    const target = branchPushTarget(preview);
+    const remoteUrl = githubRemoteUrl(target.headRepository);
+    const remoteCommit = withTemporaryGithubGitConfig(
+      runner,
+      ({ gitConfigGlobal, temporaryRepository }) =>
+        readGithubRemoteBranch(
+          temporaryRepository,
+          {
+            remoteUrl,
+            branch: preview.state.head_branch,
+            gitConfigGlobal,
+            runner: gitRunner,
+          },
+        ),
+      { temporaryRoot },
+    );
+    if (remoteCommit === target.expectedRemoteCommit) {
+      reconciliation = {
+        status: "not_applied",
+        remote_state: {
+          head_repository: target.headRepository,
+          branch: preview.state.head_branch,
+          commit: remoteCommit,
+        },
+      };
+    } else if (remoteCommit === preview.state.head_commit) {
+      const branchProof = buildBranchPushProof(preview);
+      const prReconciliation = reconcileCreatedPullRequest(
+        publishPrPullRequestPreview(preview),
+        runner,
+        documentationImpact,
+      );
+      if (prReconciliation.status === "applied") {
+        reconciliation = {
+          status: "applied",
+          proof: buildPublishPrProof(
+            preview,
+            branchProof,
+            prReconciliation.proof,
+          ),
+        };
+      } else {
+        return {
+          ...buildActionReconciliationResult(
+            preview,
+            approvalFingerprint,
+            {
+              head_repository: target.headRepository,
+              branch: preview.state.head_branch,
+              commit: remoteCommit,
+              pr_condition: "absent",
+            },
+            "partial",
+            now,
+          ),
+          proof: buildPublishPrProof(
+            preview,
+            branchProof,
+            null,
+          ),
+        };
+      }
+    } else {
+      throw new ApprovalDriftError(
+        "publish_pr reconcile 的遠端分支已漂移",
       );
     }
   } else if (preview.action === "branch_push") {

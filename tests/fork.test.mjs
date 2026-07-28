@@ -5,6 +5,7 @@ import {
 } from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
 import {
   applyGithubAction,
+  buildGithubCapabilityProof,
   buildGithubActionApproval,
   buildGithubActionPreview,
   reconcileGithubAction,
@@ -32,7 +33,15 @@ function forkState({ operation = "create", relationship = "contribute" } = {}) {
       default_branch_only: true,
       operation,
     },
-    release_enabled: false,
+    capability_proof: buildGithubCapabilityProof({
+      account: "example-user",
+      repository: "example-upstream/sample-skill",
+      permission:
+        relationship === "contribute" ? "READ" : "ADMIN",
+      defaultBranch: "main",
+      immutableReleases: false,
+      inspectedAt: "2026-07-24T07:00:00.000Z",
+    }),
     provider_contract_hash: "provider123",
   };
 }

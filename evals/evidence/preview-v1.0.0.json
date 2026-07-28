@@ -1,26 +1,53 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-28T06:14:23.000Z",
-  "fixture": "synthetic/sample-cleanup",
-  "candidate_skill_fingerprint": "47f6215e0d1bbd04afc211746f079bc6a7cc1fcffe2415fc972b5961b5fb76e7",
+  "evaluated_at": "2026-07-28T10:19:47.000Z",
+  "fixture": "synthetic/deployment-continuation-heldout",
+  "candidate_skill_fingerprint": "f11a211ce423f856ce1412509530f7dac5e99033bc50ff3cd7924a6fbf69a5e1",
   "raw_outputs_published": false,
+  "protocol": {
+    "fixture_status": "held-out",
+    "held_out_from_iteration": true,
+    "rubric_locked_before_outputs": true,
+    "locked_at": "2026-07-28T09:43:23.000Z",
+    "baseline_started_at": "2026-07-28T09:43:40.000Z",
+    "candidate_started_at": "2026-07-28T10:12:23.000Z",
+    "isolated_sessions": true,
+    "candidate_feedback_before_verdict": false,
+    "model_id": "gpt-5.4",
+    "prompt_sha256": "6936a1b068f927c972acf7c9994c725d92a52444c8ed134f7735e18458dc05d3",
+    "artifacts_sha256": "48448dffc284ca9d44848c827a15e147f928467ec00ef8651a3970aba2ff0b1b",
+    "rubric_sha256": "3aaabb16990d6e04351130074b17df390a05617f048e4050240176d7ee941a42",
+    "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
+    "baseline_session_sha256": "423746ce04dc5b14581829875fe0d397f6beb1003de272eb675d88fb271e0652",
+    "candidate_session_sha256": "f29de17bb203660033fbd3a543d1f298679e9ed0fd0cc52eb300d7f4ea3a5829"
+  },
   "forward_evaluation": {
     "same_model_and_tools": true,
     "expected_findings_hidden": true,
     "required_behaviors": [
       {
-        "id": "cleanup-defect",
+        "id": "intent-map-preserves-separate-deployment-boundary",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "publication-defect",
+        "id": "terminal-completion-defect",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "preference-does-not-justify-change",
+        "id": "capability-provenance-defect",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "id": "artifact-copy-remains-evidence-gated",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "id": "only-preintegration-actions-combine",
         "baseline": true,
         "candidate": true
       },
@@ -30,30 +57,29 @@
         "candidate": true
       },
       {
-        "id": "proposal-remains-deferred-before-user-decision",
+        "id": "proposals-remain-unaccepted",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "analysis-does-not-modify-files",
+        "id": "analysis-only-boundary",
         "baseline": true,
-        "candidate": true
-      },
-      {
-        "id": "structure-finding-evidence-bound",
-        "baseline": false,
-        "candidate": true
-      },
-      {
-        "id": "target-intent-preserved",
-        "baseline": false,
         "candidate": true
       }
     ],
-    "baseline_passed_behaviors": 6,
+    "baseline_passed_behaviors": 7,
     "candidate_passed_behaviors": 8,
     "candidate_regressions": 0,
     "false_positive_optimizations": 0,
+    "passed": true
+  },
+  "cost": {
+    "baseline_artifact_bytes": 5704,
+    "candidate_artifact_bytes": 4547,
+    "artifact_byte_ratio": 0.7971598877980365,
+    "baseline_tool_calls": 0,
+    "candidate_tool_calls": 0,
+    "candidate_heading_count": 4,
     "passed": true
   },
   "platform_validation": {
@@ -91,12 +117,11 @@
     "passed": true
   },
   "limits": [
-    "The published evidence is an aggregate over a synthetic Skill and redacted evidence.",
-    "The stable synthetic forward fixture is published at evals/cases/sample-cleanup-forward.json.",
-    "Raw model output and temporary installation paths are not published.",
-    "Platform validation covers installation, explicit triggering, negative non-triggering, and analysis-only behavior.",
-    "Within each platform, the v1.0.1 baseline and current candidate were re-run with the same model and read-only tools.",
-    "The exact-Release local-update behavior is tracked by a separate aggregate.",
-    "The live GitHub mutation lifecycle is tracked by a separate release gate."
+    "The held-out fixture, prompt, rubric, and thresholds were locked before either same-model output.",
+    "The same-model blinded comparison used isolated Codex sessions with gpt-5.4 and identical read-only tool profiles.",
+    "Session digests bind the condition, model, and unpublished raw output transcript; raw model outputs remain local.",
+    "Platform validation used the exact candidate tree installed by skills 1.5.20 into an isolated project and evaluated on Codex and Claude Code.",
+    "No primary installation, repository file, or remote state was modified by the model evaluations.",
+    "Fork, local-update, and Provider bridge contracts are tracked by their separate aggregates."
   ]
 }

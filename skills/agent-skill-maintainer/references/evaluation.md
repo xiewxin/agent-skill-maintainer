@@ -2,7 +2,9 @@
 
 Establish a no-skill baseline before evaluating the candidate. Compare the same model, prompt, artifacts, and tools without revealing expected findings.
 
-Measure discovery, false positives, ownership, closure, actionability, correction count, elapsed reference time, tool calls, and artifact bytes. Lock quality and cost thresholds before viewing candidate results. Do not collect or estimate Token usage.
+A publishable same-model blinded A/B must use a fixture held out from optimization iteration. Before either output exists, lock the rubric and the prompt, artifact, model, and tool identities. Run baseline and candidate in distinct sessions; do not give candidate feedback before the verdict. The public aggregate must bind hashes for the prompt, supplied artifacts, rubric, tool profile, and both distinct session identities, plus timestamps proving the lock preceded both runs. Raw outputs remain local and unpublished.
+
+Measure discovery, false positives, ownership, closure, actionability, correction count, elapsed reference time, tool calls, artifact bytes, and any fixture-specific structural limit. Lock quality and cost thresholds before viewing candidate results. Recomputable counts and cost ratios must agree with the published aggregate. Do not collect or estimate Token usage.
 
 A Preview or stable release requires:
 

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/publish-pr-proof.schema.json",
+  "title": "Compound Branch Push and Pull Request Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "status",
+    "branch_push_proof",
+    "pr_proof",
+    "verified"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["applied", "partial"]},
+    "branch_push_proof": {"type": "object"},
+    "pr_proof": {"type": ["object", "null"]},
+    "verified": {"type": "boolean", "const": true}
+  }
+}

@@ -17,6 +17,7 @@ import {
 import {
   buildGithubActionApproval,
   buildGithubActionPreview,
+  buildGithubCapabilityProof,
 } from "../skills/agent-skill-maintainer/scripts/lib/github.mjs";
 import {
   buildLocalUpdateApproval,
@@ -26,6 +27,7 @@ import {
 } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 import {
   authorizeGithubActionReconcile,
+  createPublicationContinuation,
   InvalidStateTransition,
   LockUnavailableError,
   createRun,
@@ -231,12 +233,19 @@ function actionEvidence(
           default_branch_only: true,
           operation: "create",
         }
-      : action === "branch_push"
+      : action === "branch_push" || action === "publish_pr"
       ? {
           candidate_path_fingerprint: "d".repeat(64),
           expected_remote_commit: null,
           head_repository: "example/skill",
           operation: "create",
+          ...(action === "publish_pr"
+            ? {
+                title: "Publish the verified workflow",
+                body: "Includes the approved change.",
+                draft: false,
+              }
+            : {}),
         }
       : action === "pr_update" || action === "merge"
         ? { pr_number: 1, summary: `${action} workflow improvement` }
@@ -255,7 +264,14 @@ function actionEvidence(
     head_commit: headCommit,
     diff_hash: CANDIDATE_SNAPSHOT.candidate_diff_hash,
     action_target: actionTarget,
-    release_enabled: true,
+    capability_proof: buildGithubCapabilityProof({
+      account: "example-user",
+      repository: "example/skill",
+      permission: relationship === "managed" ? "ADMIN" : "READ",
+      defaultBranch: "main",
+      immutableReleases: true,
+      inspectedAt: "2026-07-28T08:00:00.000Z",
+    }),
     provider_contract_hash: "provider123",
   });
   const confirmedAt = new Date(Date.now() - 60_000);
@@ -355,7 +371,7 @@ test("run state is minimal, versioned, and recoverable", () => {
       bindingId: "binding-001",
       target: { skill: "example-skill", repository: "example/skill" },
     });
-    assert.equal(created.schema_version, 7);
+    assert.equal(created.schema_version, 8);
     assert.equal(created.phase, "target_selection");
     assert.deepEqual(readRun(root, "run-001"), created);
     assert.doesNotMatch(JSON.stringify(created), /raw_transcript|secret/u);
@@ -538,9 +554,226 @@ test("full managed lifecycle includes PR update and local update", () => {
       { proof: localUpdateProof() },
       { providerContractHash: LOCAL_PROVIDER_HASH },
     );
-    document = transitionRun(root, "run-001", "completed");
+    document = transitionRun(root, "run-001", "completed", {
+      updates: {
+        completion_disposition: {
+          schema_version: 1,
+          kind: "local_update_verified",
+          after_phase: "local_update",
+          reason: "The exact published Skill update was verified.",
+        },
+      },
+    });
     assert.equal(document.phase, "completed");
     assert.equal(document.status, "completed");
+  });
+});
+
+test("merge completion is explicit and can seed one verified release continuation", () => {
+  withStateRoot((root) => {
+    createRun(root, {
+      runId: "run-source",
+      bindingId: "binding-001",
+      target: {
+        skill: "example-skill",
+        repository: "example/skill",
+      },
+    });
+    for (const [phase, updates] of [
+      ["evidence_collection", {}],
+      ["feedback_validation", {}],
+      ["optimization_design", {}],
+      ["optimization_approval", {}],
+      [
+        "isolation",
+        {
+          repository_snapshot: REPOSITORY_SNAPSHOT,
+          approvals: [implementationApproval("run-source")],
+        },
+      ],
+      ["implementation", {}],
+      ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
+      [
+        "branch_push",
+        {
+          validation_summary: VALIDATION_SUMMARY,
+          ...actionEvidence("branch_push", {
+            runId: "run-source",
+          }),
+        },
+      ],
+      [
+        "pr_creation",
+        {
+          branch_push_proof: BRANCH_PUSH_PROOF,
+          validation_summary: VALIDATION_SUMMARY,
+          ...actionEvidence("pr_create", {
+            runId: "run-source",
+          }),
+        },
+      ],
+      [
+        "merge",
+        {
+          pr_proof: PR_PROOF,
+          ...actionEvidence("merge", {
+            runId: "run-source",
+          }),
+        },
+      ],
+    ]) {
+      transitionRun(root, "run-source", phase, { updates });
+    }
+    assert.throws(
+      () => transitionRun(root, "run-source", "completed"),
+      /completion disposition/u,
+    );
+    const mergeProof = {
+      schema_version: 1,
+      repository: "example/skill",
+      pr_number: 1,
+      merge_commit: MERGE_COMMIT,
+      default_branch: "main",
+    };
+    const completed = transitionRun(
+      root,
+      "run-source",
+      "completed",
+      {
+        updates: {
+          pr_proof: PR_PROOF,
+          merge_proof: mergeProof,
+          completion_disposition: {
+            schema_version: 1,
+            kind: "stop_after_merge",
+            after_phase: "merge",
+            reason: "The user stopped after the verified merge.",
+          },
+        },
+      },
+    );
+    assert.equal(
+      completed.completion_disposition.kind,
+      "stop_after_merge",
+    );
+    assert.throws(
+      () =>
+        createPublicationContinuation(root, {
+          sourceRunId: "run-source",
+          runId: "run-release-invalid",
+          bindingId: "binding-001",
+          mergeProof: {
+            ...mergeProof,
+            merge_commit: "0".repeat(40),
+          },
+        }),
+      /merge proof/u,
+    );
+    const continuation = createPublicationContinuation(root, {
+      sourceRunId: "run-source",
+      runId: "run-release",
+      bindingId: "binding-001",
+      mergeProof,
+    });
+    assert.equal(continuation.phase, "merge");
+    assert.equal(continuation.status, "active");
+    assert.equal(
+      continuation.continuation.source_run_id,
+      "run-source",
+    );
+    assert.deepEqual(continuation.merge_proof, mergeProof);
+  });
+});
+
+test("publish_pr keeps granular pr_create fallback after a verified push", () => {
+  withStateRoot((root) => {
+    const publishEvidence = actionEvidence("publish_pr");
+    createRun(root, {
+      runId: "run-001",
+      bindingId: "binding-001",
+      target: {
+        skill: "example-skill",
+        repository: "example/skill",
+      },
+    });
+    for (const [phase, updates] of [
+      ["evidence_collection", {}],
+      ["feedback_validation", {}],
+      ["optimization_design", {}],
+      ["optimization_approval", {}],
+      [
+        "isolation",
+        {
+          repository_snapshot: REPOSITORY_SNAPSHOT,
+          approvals: [implementationApproval()],
+        },
+      ],
+      ["implementation", {}],
+      ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
+      [
+        "publish_pr",
+        {
+          validation_summary: VALIDATION_SUMMARY,
+          ...publishEvidence,
+        },
+      ],
+    ]) {
+      transitionRun(root, "run-001", phase, { updates });
+    }
+    reserveGithubActionApply(
+      root,
+      "run-001",
+      publishEvidence.action_preview,
+      publishEvidence.approvals[0],
+      { providerContractHash: "provider123" },
+    );
+    assert.throws(
+      () => transitionRun(root, "run-001", "publish_pr"),
+      /未證明未寫入/u,
+    );
+    const prCreateUpdates = {
+      branch_push_proof: BRANCH_PUSH_PROOF,
+      validation_summary: VALIDATION_SUMMARY,
+      ...actionEvidence("pr_create"),
+    };
+    assert.throws(
+      () =>
+        transitionRun(
+          root,
+          "run-001",
+          "pr_creation",
+          { updates: prCreateUpdates },
+        ),
+      /唯讀證明 PR 不存在/u,
+    );
+    recordGithubActionReconciliation(
+      root,
+      "run-001",
+      publishEvidence.action_preview,
+      publishEvidence.approvals[0],
+      {
+        schema_version: 1,
+        action: "publish_pr",
+        repository: "example/skill",
+        approval_fingerprint:
+          publishEvidence.approvals[0].fingerprint,
+        preview_fingerprint:
+          publishEvidence.action_preview.fingerprint,
+        observed_at: "2026-07-24T08:10:00.000Z",
+        status: "partial",
+        remote_state_hash: "d".repeat(64),
+      },
+      { providerContractHash: "provider123" },
+    );
+    const fallback = transitionRun(
+      root,
+      "run-001",
+      "pr_creation",
+      {
+        updates: prCreateUpdates,
+      },
+    );
+    assert.equal(fallback.phase, "pr_creation");
   });
 });
 
@@ -917,13 +1150,17 @@ test("legacy terminal run migrates before current schema validation", () => {
       "utf8",
     );
     const migrated = readRun(root, "run-001");
-    assert.equal(migrated.schema_version, 7);
+    assert.equal(migrated.schema_version, 8);
     assert.equal(migrated.phase, "completed");
+    assert.equal(
+      migrated.completion_disposition.kind,
+      "legacy_completed",
+    );
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), migrated);
   });
 });
 
-test("v5 run migrates to v7 without inventing remote evidence", () => {
+test("v5 run migrates to v8 without inventing remote evidence", () => {
   withStateRoot((root) => {
     const path = join(root, "runs", "run-001", "state.json");
     mkdirSync(dirname(path), { recursive: true });
@@ -945,7 +1182,7 @@ test("v5 run migrates to v7 without inventing remote evidence", () => {
       "utf8",
     );
     const migrated = readRun(root, "run-001");
-    assert.equal(migrated.schema_version, 7);
+    assert.equal(migrated.schema_version, 8);
     assert.equal(migrated.fork_proof, undefined);
     assert.deepEqual(migrated.github_action_attempts, []);
     assert.deepEqual(migrated.local_update_attempts, []);
@@ -1231,7 +1468,14 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
         head_repository: "example/skill",
         operation: "create",
       },
-      release_enabled: true,
+      capability_proof: buildGithubCapabilityProof({
+        account: "example-user",
+        repository: "example/skill",
+        permission: "ADMIN",
+        defaultBranch: "main",
+        immutableReleases: true,
+        inspectedAt: "2026-07-28T08:00:00.000Z",
+      }),
       provider_contract_hash: "provider123",
     });
     const expiredApproval = buildGithubActionApproval(preview, {

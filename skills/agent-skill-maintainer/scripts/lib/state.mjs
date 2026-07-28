@@ -56,6 +56,7 @@ const CONSUMED_ACTION_PHASES = new Set([
   "isolation",
   "fork_creation",
   "branch_push",
+  "publish_pr",
   "pr_creation",
   "pr_update",
   "merge",
@@ -65,6 +66,7 @@ const CONSUMED_ACTION_PHASES = new Set([
 const GITHUB_ACTION_PHASES = Object.freeze({
   fork_create: "fork_creation",
   branch_push: "branch_push",
+  publish_pr: "publish_pr",
   pr_create: "pr_creation",
   pr_update: "pr_update",
   merge: "merge",
@@ -88,11 +90,13 @@ const NEXT_PHASES = Object.freeze({
   validation: new Set([
     "fork_creation",
     "branch_push",
+    "publish_pr",
     "optimization_approval",
   ]),
   fork_creation: new Set([
     "fork_creation",
     "branch_push",
+    "publish_pr",
     "optimization_approval",
   ]),
   branch_push: new Set([
@@ -100,6 +104,13 @@ const NEXT_PHASES = Object.freeze({
     "pr_creation",
     "pr_update",
     "optimization_approval",
+  ]),
+  publish_pr: new Set([
+    "publish_pr",
+    "pr_creation",
+    "merge",
+    "optimization_approval",
+    "completed",
   ]),
   pr_creation: new Set([
     "pr_creation",
@@ -161,6 +172,12 @@ const PHASE_UPDATE_FIELDS = Object.freeze({
     "fork_proof",
     "validation_summary",
   ]),
+  publish_pr: new Set([
+    "action_preview",
+    "approvals",
+    "fork_proof",
+    "validation_summary",
+  ]),
   pr_creation: new Set([
     "action_preview",
     "approvals",
@@ -188,7 +205,12 @@ const PHASE_UPDATE_FIELDS = Object.freeze({
     "publication_proof",
     "update_proof",
   ]),
-  completed: new Set(),
+  completed: new Set([
+    "completion_disposition",
+    "merge_proof",
+    "pr_proof",
+    "publication_proof",
+  ]),
   aborted: new Set(),
   blocked: new Set(),
 });
@@ -271,7 +293,7 @@ function migrateRunDocument(document) {
   if (!Number.isInteger(document.schema_version)) {
     throw new Error("run state schema_version 不合法");
   }
-  if (document.schema_version === 7) {
+  if (document.schema_version === 8) {
     return {
       document: clone(document),
       migrated: false,
@@ -279,7 +301,9 @@ function migrateRunDocument(document) {
   }
   let current;
   let migrated = true;
-  if (document.schema_version === 6) {
+  if (document.schema_version === 7) {
+    current = clone(document);
+  } else if (document.schema_version === 6) {
     current = clone(document);
   } else if (document.schema_version === 5) {
     current = clone(document);
@@ -361,7 +385,19 @@ function migrateRunDocument(document) {
   current.attempted_local_update_fingerprints ??= [];
   current.local_update_attempts ??= [];
   current.local_update_reconciliations ??= [];
-  current.schema_version = 7;
+  if (
+    current.status === "completed" &&
+    !isObject(current.completion_disposition)
+  ) {
+    current.completion_disposition = {
+      schema_version: 1,
+      kind: "legacy_completed",
+      after_phase: "unknown",
+      reason:
+        "Migrated terminal state predates explicit completion dispositions.",
+    };
+  }
+  current.schema_version = 8;
   return {
     document: current,
     migrated,
@@ -379,7 +415,7 @@ export function createRun(
     throw new Error(`run 已存在：${runId}`);
   }
   const document = {
-    schema_version: 7,
+    schema_version: 8,
     run_id: runId,
     binding_id: safeBindingId,
     phase: "target_selection",
@@ -440,6 +476,108 @@ export function readRun(stateRoot, runId) {
     atomicWriteJson(path, document);
   }
   return document;
+}
+
+/** Starts a bounded release continuation from an explicitly stopped merge. */
+export function createPublicationContinuation(
+  stateRoot,
+  {
+    sourceRunId,
+    runId,
+    bindingId,
+    mergeProof,
+  },
+) {
+  const root = resolve(stateRoot);
+  const source = readRun(root, sourceRunId);
+  const safeBindingId = safeComponent(bindingId, "binding_id");
+  if (runId === sourceRunId || existsSync(runPath(root, runId))) {
+    throw new Error(`run 已存在或與來源重複：${runId}`);
+  }
+  if (
+    source.status !== "completed" ||
+    source.phase !== "completed" ||
+    source.binding_id !== safeBindingId ||
+    source.completion_disposition?.kind !== "stop_after_merge" ||
+    source.completion_disposition?.after_phase !== "merge"
+  ) {
+    throw new InvalidStateTransition(
+      "只有明確 stop_after_merge 的 terminal run 可續接發布",
+    );
+  }
+  validateDocument("merge-proof", mergeProof);
+  validateDocument("merge-proof", source.merge_proof);
+  if (canonicalJson(mergeProof) !== canonicalJson(source.merge_proof)) {
+    throw new InvalidStateTransition(
+      "提供的 merge proof 與來源 run 不一致",
+    );
+  }
+  validateRunCandidate(source);
+  validateDocument("pr-proof", source.pr_proof);
+  if (
+    source.merge_proof.repository !== source.target?.repository ||
+    source.merge_proof.pr_number !== source.pr_proof.number ||
+    source.merge_proof.default_branch !== source.pr_proof.base_branch
+  ) {
+    throw new InvalidStateTransition(
+      "來源 run 的 merge、PR 與 repository 證明不一致",
+    );
+  }
+
+  return withBindingLock(root, safeBindingId, () => {
+    if (existsSync(runPath(root, runId))) {
+      throw new Error(`run 已存在：${runId}`);
+    }
+    const leaseCreated = claimImplementationLease(
+      root,
+      safeBindingId,
+      runId,
+    );
+    try {
+      const document = {
+        schema_version: 8,
+        run_id: runId,
+        binding_id: safeBindingId,
+        phase: "merge",
+        status: "active",
+        target: clone(source.target),
+        approvals: [],
+        consumed_approval_fingerprints: [],
+        attempted_github_action_fingerprints: [],
+        github_action_attempts: [],
+        github_action_reconciliations: [],
+        attempted_local_update_fingerprints: [],
+        local_update_attempts: [],
+        local_update_reconciliations: [],
+        evidence_ids: clone(source.evidence_ids ?? []),
+        feedback_ids: clone(source.feedback_ids ?? []),
+        optimization_ids: clone(source.optimization_ids ?? []),
+        repository_snapshot: clone(source.repository_snapshot),
+        candidate_snapshot: clone(source.candidate_snapshot),
+        validation_summary: clone(source.validation_summary),
+        pr_proof: clone(source.pr_proof),
+        merge_proof: clone(source.merge_proof),
+        continuation: {
+          schema_version: 1,
+          source_run_id: sourceRunId,
+          source_state_fingerprint: fingerprint(source),
+          merge_proof_fingerprint: fingerprint(mergeProof),
+        },
+      };
+      validateDocument("run-state", document);
+      atomicWriteJson(runPath(root, runId), document);
+      return clone(document);
+    } catch (error) {
+      if (leaseCreated) {
+        releaseImplementationLease(
+          root,
+          safeBindingId,
+          runId,
+        );
+      }
+      throw error;
+    }
+  });
 }
 
 /** Validates one GitHub action against its active run and candidate. */
@@ -1199,6 +1337,77 @@ function validateRunCandidate(document) {
   return candidate;
 }
 
+/** Requires an explicit stop reason that matches the phase being completed. */
+function validateCompletionDisposition(document) {
+  const disposition = document.completion_disposition;
+  if (
+    !isObject(disposition) ||
+    disposition.schema_version !== 1 ||
+    typeof disposition.reason !== "string" ||
+    disposition.reason.trim().length === 0
+  ) {
+    throw new InvalidStateTransition(
+      "completed 必須提供明確 completion disposition",
+    );
+  }
+  const expected = {
+    optimization_design: "no_improvements",
+    publish_pr: "stop_after_pr",
+    pr_creation: "stop_after_pr",
+    pr_update: "stop_after_pr",
+    merge: "stop_after_merge",
+    release: "stop_after_release",
+    local_update: "local_update_verified",
+  }[document.phase];
+  if (
+    expected === undefined ||
+    disposition.kind !== expected ||
+    disposition.after_phase !== document.phase
+  ) {
+    throw new InvalidStateTransition(
+      `completion disposition 與 ${document.phase} 階段不一致`,
+    );
+  }
+  if (expected === "stop_after_pr") {
+    validateDocument("pr-proof", document.pr_proof);
+    if (
+      document.pr_proof.repository !== document.target?.repository ||
+      document.pr_proof.head_commit !==
+        document.candidate_snapshot?.repository_snapshot?.head_commit
+    ) {
+      throw new InvalidStateTransition(
+        "stop_after_pr 缺少目前候選的 PR proof",
+      );
+    }
+  }
+  if (expected === "stop_after_merge") {
+    validateDocument("merge-proof", document.merge_proof);
+    validateDocument("pr-proof", document.pr_proof);
+    if (
+      document.merge_proof.repository !== document.target?.repository ||
+      document.merge_proof.pr_number !== document.pr_proof.number ||
+      document.merge_proof.default_branch !== document.pr_proof.base_branch
+    ) {
+      throw new InvalidStateTransition(
+        "stop_after_merge 缺少一致的 merge proof",
+      );
+    }
+  }
+  if (expected === "stop_after_release") {
+    validateDocument("publication-proof", document.publication_proof);
+    if (
+      document.publication_proof.repository !==
+        document.target?.repository ||
+      document.publication_proof.commit !==
+        document.merge_proof?.merge_commit
+    ) {
+      throw new InvalidStateTransition(
+        "stop_after_release 缺少一致的 publication proof",
+      );
+    }
+  }
+}
+
 /** Enforces proof-forward contracts before entering side-effect stages. */
 function requirePhaseEvidence(document, nextPhase) {
   if (nextPhase === "isolation") {
@@ -1260,6 +1469,33 @@ function requirePhaseEvidence(document, nextPhase) {
       });
     }
   }
+  if (nextPhase === "publish_pr") {
+    const candidate = validateRunCandidate(document);
+    validatePrReadyValidation(document.validation_summary, candidate);
+    requireActionApproval(
+      document,
+      "publish_pr",
+      {
+        expectedHeadCommit:
+          candidate.repository_snapshot.head_commit,
+        expectedDiffHash: candidate.candidate_diff_hash,
+        expectedBaseBranch:
+          candidate.repository_snapshot.base_ref,
+      },
+    );
+    if (
+      document.action_preview.state.relationship === "contribute"
+    ) {
+      const target = document.action_preview.state.action_target;
+      validateForkProofContract(document.fork_proof, {
+        repository: document.target.repository,
+        forkRepository: target.head_repository,
+        account: document.action_preview.state.account,
+        baseBranch: candidate.repository_snapshot.base_ref,
+        baseCommit: candidate.repository_snapshot.merge_base,
+      });
+    }
+  }
   if (["pr_creation", "pr_update"].includes(nextPhase)) {
     const candidate = validateRunCandidate(document);
     const validation = validatePrReadyValidation(
@@ -1312,6 +1548,28 @@ function requirePhaseEvidence(document, nextPhase) {
         document.pr_proof.number
     ) {
       throw new InvalidStateTransition("PR update 目標與 PR proof 不一致");
+    }
+    if (nextPhase === "pr_creation" && document.phase === "publish_pr") {
+      const latestAttempt = document.github_action_attempts
+        .filter((attempt) => attempt.action === "publish_pr")
+        .at(-1);
+      const latestReconciliation =
+        document.github_action_reconciliations
+          .filter(
+            (item) =>
+              item.action === "publish_pr" &&
+              item.approval_fingerprint ===
+                latestAttempt?.approval_fingerprint,
+          )
+          .at(-1);
+      if (
+        latestAttempt === undefined ||
+        latestReconciliation?.status !== "partial"
+      ) {
+        throw new InvalidStateTransition(
+          "publish_pr 必須先唯讀證明 PR 不存在，才可改用 pr_create",
+        );
+      }
     }
   }
   if (nextPhase === "merge") {
@@ -1448,6 +1706,9 @@ function requirePhaseEvidence(document, nextPhase) {
         "Local update proof 與目前發布狀態不一致",
       );
     }
+  }
+  if (nextPhase === "completed") {
+    validateCompletionDisposition(document);
   }
 }
 

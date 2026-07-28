@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/github-capability-proof.schema.json",
+  "title": "Verified GitHub Repository Capability Proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "account",
+    "repository",
+    "permission",
+    "default_branch",
+    "relationship",
+    "immutable_releases",
+    "release_enabled",
+    "inspected_at",
+    "fingerprint"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "account": {"type": "string", "minLength": 1},
+    "repository": {"type": "string", "minLength": 1},
+    "permission": {
+      "type": "string",
+      "enum": ["READ", "TRIAGE", "WRITE", "MAINTAIN", "ADMIN"]
+    },
+    "default_branch": {"type": "string", "minLength": 1},
+    "relationship": {
+      "type": "string",
+      "enum": ["managed", "contribute"]
+    },
+    "immutable_releases": {"type": "boolean"},
+    "release_enabled": {"type": "boolean"},
+    "inspected_at": {"type": "string", "format": "date-time"},
+    "fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+  }
+}

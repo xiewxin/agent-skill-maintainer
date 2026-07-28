@@ -6,12 +6,12 @@
   "additionalProperties": false,
   "required": ["schema_version", "run_id", "binding_id", "phase", "status", "approvals", "consumed_approval_fingerprints", "attempted_github_action_fingerprints", "github_action_attempts", "github_action_reconciliations", "attempted_local_update_fingerprints", "local_update_attempts", "local_update_reconciliations"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 7},
+    "schema_version": {"type": "integer", "const": 8},
     "run_id": {"type": "string", "minLength": 1},
     "binding_id": {"type": "string", "minLength": 1},
     "phase": {
       "type": "string",
-      "enum": ["target_selection", "evidence_collection", "feedback_validation", "optimization_design", "optimization_approval", "isolation", "implementation", "validation", "fork_creation", "branch_push", "pr_creation", "pr_update", "merge", "release", "local_update", "completed", "aborted", "blocked"]
+      "enum": ["target_selection", "evidence_collection", "feedback_validation", "optimization_design", "optimization_approval", "isolation", "implementation", "validation", "fork_creation", "branch_push", "publish_pr", "pr_creation", "pr_update", "merge", "release", "local_update", "completed", "aborted", "blocked"]
     },
     "status": {"type": "string", "enum": ["active", "completed", "aborted", "blocked"]},
     "target": {"type": "object"},
@@ -34,7 +34,7 @@
         "additionalProperties": false,
         "required": ["action", "approval_fingerprint"],
         "properties": {
-          "action": {"type": "string", "enum": ["fork_create", "branch_push", "pr_create", "pr_update", "merge", "release", "unknown"]},
+          "action": {"type": "string", "enum": ["fork_create", "branch_push", "publish_pr", "pr_create", "pr_update", "merge", "release", "unknown"]},
           "approval_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
           "attempted_at": {"type": "string", "format": "date-time"},
           "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
@@ -80,6 +80,34 @@
     "publication_proof": {"type": "object"},
     "release_version": {"type": "string", "minLength": 1},
     "release_coverage": {"type": "object"},
-    "update_proof": {"type": "object"}
+    "update_proof": {"type": "object"},
+    "completion_disposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "after_phase", "reason"],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "kind": {
+          "type": "string",
+          "enum": ["no_improvements", "stop_after_pr", "stop_after_merge", "stop_after_release", "local_update_verified", "legacy_completed"]
+        },
+        "after_phase": {
+          "type": "string",
+          "enum": ["optimization_design", "publish_pr", "pr_creation", "pr_update", "merge", "release", "local_update", "unknown"]
+        },
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "continuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "source_run_id", "source_state_fingerprint", "merge_proof_fingerprint"],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "source_run_id": {"type": "string", "minLength": 1},
+        "source_state_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "merge_proof_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    }
   }
 }

@@ -6,10 +6,10 @@
 4. Build a change inventory from the previous official tag through the candidate commit.
 5. Map every in-range commit, detected Pull Request, and accepted `OPT-*` to a release-note entry or an explicit exclusion reason.
 6. For contributor mode, verify and reuse the active account's personal Fork read-only or create it only after a separate preview and confirmation; require the resulting Fork proof.
-7. Push the approved clean candidate branch only after its dedicated confirmation; require the resulting branch proof before PR creation or update.
-8. Create or update the Pull Request only after its dedicated confirmation.
+7. Inspect and bind the current GitHub capability proof. Then either push the approved clean candidate branch under its granular confirmation or preview the exact compound `publish_pr` action.
+8. For granular flow, require branch proof before separately confirmed PR creation. For compound flow, require both proofs before continuing; unobservable PR state stays pending and permits only read-only reconciliation, while a partial result proves absence before a fresh granular PR confirmation. PR updates remain separate.
 9. Re-read head commit, checks, ruleset, Diff fingerprint, and account before a separately confirmed merge.
-10. Preview version, tag, target commit, title, complete notes, and release settings before a separately confirmed release.
+10. If stopping after merge, record `stop_after_merge` with the exact merge proof. A later continuation must bind that terminal state and proof. Preview version, tag, target commit, title, complete notes, and release settings before a separately confirmed release.
 11. Verify that the official tag and GitHub Release contain the approved main commit.
 12. Only then inspect the recorded installation method. For a proven global `npx-skills` symlink installation, preview and confirm an update pinned to the exact Release commit, reserve the action once, atomically replace Skill and lock, and verify the update proof. Reconcile read-only after interruption. Unsupported methods remain blocked, and the current task keeps using its loaded version.
 

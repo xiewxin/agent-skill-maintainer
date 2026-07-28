@@ -1125,7 +1125,7 @@ test("CLI apply reserves once and persists the verified update proof", () => {
     writeFileSync(
       runPath,
       `${JSON.stringify({
-        schema_version: 7,
+        schema_version: 8,
         run_id: "run-001",
         binding_id: "binding-001",
         phase: "local_update",
