@@ -13,6 +13,8 @@ Agent Skill Maintainer reviews what actually happened in a task—not just what 
 Point it at one Skill and give it evidence from the current task, a past experience, an Issue, or PR feedback. It can:
 
 - **Find problems users did not explicitly report**, such as a wrong decision, a missing step, unnecessary work, or a workflow that never closes.
+- **Preserve the target Skill's intent first** by mapping its purpose, non-goals, invocation and completion contracts, and durable decisions. Popular patterns remain comparative evidence and cannot override verified boundaries.
+- **Diagnose structure only when it affects behavior**, including trigger precision, checkable completion, progressive disclosure, duplicated authority, or stale no-op material—not personal formatting taste.
 - **Decide whether the Skill should change** by distinguishing a reproducible Skill defect from a preference, stale version, platform limitation, or unrelated request.
 - **Turn evidence into a minimal improvement** with a clear scope, expected closure, and regression case.
 - **Implement without touching the installed Skill** by working only in a separately confirmed, isolated clone.

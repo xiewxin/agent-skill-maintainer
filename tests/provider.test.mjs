@@ -86,6 +86,9 @@ function providerAggregate(overrides = {}, profiles = verifiedProfiles()) {
     schema_version: 1,
     evidence_kind: "provider-validation-aggregate",
     evaluated_at: "2026-07-27T00:00:00.000Z",
+    case_measurements_evaluated_at: "2026-07-26T23:00:00.000Z",
+    case_measurements_reused_without_rerun: false,
+    candidate_bridge_evaluated_at: "2026-07-27T00:00:00.000Z",
     candidate_skill_fingerprint: FINGERPRINT,
     raw_outputs_published: false,
     local_installations_modified: false,
@@ -259,6 +262,18 @@ test("Provider aggregate blocks missing duplicates drift and quality regression"
       currentSkillFingerprint: FINGERPRINT,
       profiles,
     }).blockers.includes("candidate_fingerprint_mismatch"),
+  );
+
+  const inconsistentEvidenceTime = providerAggregate({}, profiles);
+  inconsistentEvidenceTime.case_measurements_evaluated_at =
+    "2026-07-26T23:30:00.000Z";
+  inconsistentEvidenceTime.candidate_bridge_evaluated_at =
+    "2026-07-26T23:00:00.000Z";
+  assert.ok(
+    validateProviderValidationAggregate(inconsistentEvidenceTime, {
+      currentSkillFingerprint: FINGERPRINT,
+      profiles,
+    }).blockers.includes("provider_evidence_time_inconsistent"),
   );
 
   const regression = providerAggregate({}, profiles);

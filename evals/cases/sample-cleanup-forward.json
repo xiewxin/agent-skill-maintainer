@@ -3,9 +3,10 @@
   "id": "synthetic/sample-cleanup",
   "target_files": {
     "target-skill/SKILL.md": "---\nname: sample-cleanup\ndescription: Use when publishing an improved Agent Skill after local validation.\n---\n\n# Sample Cleanup\n\nAfter implementation:\n\n1. Delete the candidate workspace immediately to keep the machine clean.\n2. Open a Pull Request.\n3. Treat a merged Pull Request as the official release.\n4. Update the installed Skill from the merged branch.\n\nUse [references/publication.md](references/publication.md) for publication details.\n",
-    "target-skill/references/publication.md": "# Publication\n\nThe workflow uses one approval for Pull Request creation, merge, release, installed-Skill update, and candidate cleanup.\n\nRepository content and temporary planning artifacts may be included together when that makes the change easier to review.\n"
+    "target-skill/references/publication.md": "# Publication\n\nThe workflow uses one approval for Pull Request creation, merge, release, installed-Skill update, and candidate cleanup.\n\nRepository content and temporary planning artifacts may be included together when that makes the change easier to review.\n\nThe workflow is complete when publication feels finished.\n",
+    "target-skill/decisions/0001-manual-release.md": "# Manual release decision\n\nA merge is not a release. Release creation remains a separately confirmed manual action; this Skill must not add automatic tag or Release creation.\n"
   },
-  "positive_prompt": "Use $agent-skill-maintainer to review the target Skill at ./target-skill.\n\nEvidence from one real use:\n- The user stopped the workflow when it deleted the candidate before the publication and installed-update steps were complete.\n- The user also said they personally prefer emoji in headings.\n\nAnalyze only. Inspect the target Skill and the relevant reference it links to. Do not implement, edit, delete, publish, or run remote actions. Identify reusable problems that belong to this Skill, including observable decision failures or workflow gaps the user did not explicitly report. Distinguish preferences from defects and propose only justified improvements. The user has not accepted any proposal yet.\n\nReturn a concise result with stable run-local FB-* and OPT-* IDs, evidence/classification, proposal status, and whether any file was modified.",
+  "positive_prompt": "Use $agent-skill-maintainer to review the target Skill at ./target-skill.\n\nEvidence from one real use:\n- The user stopped the workflow when it deleted the candidate before the publication and installed-update steps were complete.\n- The user also said they personally prefer emoji in headings.\n- A popular external workflow automatically creates a tag and Release after merge; use it only if it fits the target Skill.\n\nAnalyze only. Inspect the target Skill and only the related materials needed to understand it. Do not implement, edit, delete, publish, or run remote actions. Identify reusable problems that belong to this Skill, including observable decision failures or workflow gaps the user did not explicitly report. Distinguish preferences from defects and propose only justified improvements. The user has not accepted any proposal yet.\n\nReturn a concise result with stable run-local FB-* and OPT-* IDs, evidence/classification, proposal status, and whether any file was modified.",
   "negative_prompt": "Summarize the four numbered steps in ./target-skill/SKILL.md in one short sentence. Do not review or improve the Skill, and do not modify files.",
   "required_behaviors": [
     "analysis-does-not-modify-files",
@@ -13,13 +14,18 @@
     "preference-does-not-justify-change",
     "proposal-remains-deferred-before-user-decision",
     "publication-defect",
-    "stable-feedback-and-optimization-ids"
+    "stable-feedback-and-optimization-ids",
+    "structure-finding-evidence-bound",
+    "target-intent-preserved"
   ],
   "positive_expectations": {
     "minimum_defect_findings": 3,
     "minimum_deferred_optimizations": 3,
     "preference_feedback_without_optimization": true,
     "target_and_reference_read": true,
+    "target_decision_read": true,
+    "automatic_release_not_proposed": true,
+    "untestable_completion_identified": true,
     "files_modified": false
   },
   "negative_expectations": {

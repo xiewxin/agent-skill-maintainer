@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-28T05:02:21.000Z",
+  "evaluated_at": "2026-07-28T06:14:23.000Z",
   "fixture": "synthetic/sample-cleanup",
-  "candidate_skill_fingerprint": "56e6e9f6f651000639fb22b889f913ade61297f11f323839abeb2ce396535c38",
+  "candidate_skill_fingerprint": "47f6215e0d1bbd04afc211746f079bc6a7cc1fcffe2415fc972b5961b5fb76e7",
   "raw_outputs_published": false,
   "forward_evaluation": {
     "same_model_and_tools": true,
@@ -38,10 +38,20 @@
         "id": "analysis-does-not-modify-files",
         "baseline": true,
         "candidate": true
+      },
+      {
+        "id": "structure-finding-evidence-bound",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "id": "target-intent-preserved",
+        "baseline": false,
+        "candidate": true
       }
     ],
     "baseline_passed_behaviors": 6,
-    "candidate_passed_behaviors": 6,
+    "candidate_passed_behaviors": 8,
     "candidate_regressions": 0,
     "false_positive_optimizations": 0,
     "passed": true
@@ -85,7 +95,7 @@
     "The stable synthetic forward fixture is published at evals/cases/sample-cleanup-forward.json.",
     "Raw model output and temporary installation paths are not published.",
     "Platform validation covers installation, explicit triggering, negative non-triggering, and analysis-only behavior.",
-    "The v0.1.0 baseline and v1.0.0 candidate were re-run with the same Codex model and read-only tools.",
+    "Within each platform, the v1.0.1 baseline and current candidate were re-run with the same model and read-only tools.",
     "The exact-Release local-update behavior is tracked by a separate aggregate.",
     "The live GitHub mutation lifecycle is tracked by a separate release gate."
   ]
