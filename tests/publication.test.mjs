@@ -528,10 +528,10 @@ test("required public files and maintainer guidance exist", () => {
   }
 });
 
-test("README documents Preview, npx installation, and zero-dependency Node runtime", () => {
+test("README documents the stable contract, npx installation, and zero-dependency Node runtime", () => {
   const content = read("README.md");
   for (const phrase of [
-    "Preview",
+    "Stable contract",
     "npx skills add",
     "Codex",
     "Claude Code",
@@ -570,15 +570,15 @@ test("workflow is read-only and validates supported Node versions without instal
   assert.ok(!content.includes("python"));
 });
 
-test("Skill metadata, trigger cases, references, and Preview boundary remain complete", () => {
+test("Skill metadata, trigger cases, references, and stable boundary remain complete", () => {
   const skill = read("skills/agent-skill-maintainer/SKILL.md");
   assert.ok(skill.startsWith("---\n"));
   assert.ok(skill.includes("name: agent-skill-maintainer"));
   assert.ok(skill.includes("description: Use when "));
   assert.ok(skill.split("---", 3)[1].length < 1024);
-  assert.ok(skill.includes("Current Preview boundary"));
+  assert.ok(skill.includes("Stable capability boundary"));
   assert.ok(skill.includes("do not substitute manual GitHub commands"));
-  assert.ok(skill.includes("local-candidate Preview"));
+  assert.ok(skill.includes("stable workflow"));
   assert.ok(skill.includes("state-bound GitHub apply"));
   assert.ok(skill.includes("personal Fork creation"));
   assert.ok(skill.includes("branch push"));
@@ -1488,7 +1488,9 @@ test("publication, evaluation, and repository validators execute directly", () =
     "synthetic-contract-fixture",
   );
   assert.equal(report.publication_gate.authorizes_release, false);
-  assert.equal(report.release_ready, false);
+  assert.equal(report.stable_candidate_ready, true);
+  assert.equal(report.release_ready, true);
+  assert.equal(report.publication_verified, false);
   assert.equal(report.redacted_real_usage_cases, 1);
   assert.equal(report.real_usage_contract_passed, true);
   assert.equal(report.provider_version_validation.passed, true);
@@ -1542,7 +1544,8 @@ test("publication, evaluation, and repository validators execute directly", () =
     ),
     false,
   );
-  assert.deepEqual(report.release_blockers, ["controlled_github_e2e_pending"]);
+  assert.equal(report.provider_validation.passed, true);
+  assert.deepEqual(report.release_blockers, []);
 
   const repository = runNode(
     "scripts/validate-repository.mjs",

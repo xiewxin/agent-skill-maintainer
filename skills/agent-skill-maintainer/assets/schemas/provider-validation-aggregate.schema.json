@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/provider-validation-aggregate.schema.json",
+  "title": "Stable Provider Validation Aggregate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "evidence_kind", "evaluated_at", "candidate_skill_fingerprint", "raw_outputs_published", "local_installations_modified", "cases", "platforms", "passed"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "evidence_kind": {"type": "string", "const": "provider-validation-aggregate"},
+    "evaluated_at": {"type": "string", "minLength": 1},
+    "candidate_skill_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "raw_outputs_published": {"type": "boolean", "const": false},
+    "local_installations_modified": {"type": "boolean", "const": false},
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider_id", "provider_version", "release_commit", "evidence_kind", "capability_gap", "owner", "required_access", "command_ids", "artifact_kinds", "artifact_fingerprint", "isolated_home", "isolated_repository", "primary_provider_installation_modified", "remote_writes_executed", "telemetry_disabled", "fallback_validated", "owner_unique", "quality", "cost", "safety_passed", "passed"],
+        "properties": {
+          "provider_id": {"type": "string", "minLength": 1},
+          "provider_version": {"type": "string", "minLength": 1},
+          "release_commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+          "evidence_kind": {"type": "string", "enum": ["controlled-redacted-real-usage", "synthetic"]},
+          "capability_gap": {"type": "string", "minLength": 1},
+          "owner": {"type": "string", "minLength": 1},
+          "required_access": {"type": "string", "const": "commands"},
+          "command_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "artifact_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "artifact_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "isolated_home": {"type": "boolean"},
+          "isolated_repository": {"type": "boolean"},
+          "primary_provider_installation_modified": {"type": "boolean"},
+          "remote_writes_executed": {"type": "boolean"},
+          "telemetry_disabled": {"type": "boolean"},
+          "fallback_validated": {"type": "boolean"},
+          "owner_unique": {"type": "boolean"},
+          "quality": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["assessment_method", "baseline_score", "candidate_score", "max_score", "improvements", "regressions"],
+            "properties": {
+              "assessment_method": {"type": "string", "const": "manual-criteria-v1"},
+              "baseline_score": {"type": "integer"},
+              "candidate_score": {"type": "integer"},
+              "max_score": {"type": "integer"},
+              "improvements": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "regressions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+            }
+          },
+          "cost": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["elapsed_seconds", "tool_calls", "artifact_bytes"],
+            "properties": {
+              "elapsed_seconds": {"type": "integer"},
+              "tool_calls": {"type": "integer"},
+              "artifact_bytes": {"type": "integer"}
+            }
+          },
+          "safety_passed": {"type": "boolean"},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "version", "installation_validated", "positive_trigger", "negative_non_trigger", "provider_selection", "artifact_bridge", "fallback", "local_analysis_only", "files_modified", "passed"],
+        "properties": {
+          "id": {"type": "string", "enum": ["codex", "claude-code"]},
+          "version": {"type": "string", "minLength": 1},
+          "installation_validated": {"type": "boolean"},
+          "positive_trigger": {"type": "boolean"},
+          "negative_non_trigger": {"type": "boolean"},
+          "provider_selection": {"type": "boolean"},
+          "artifact_bridge": {"type": "boolean"},
+          "fallback": {"type": "boolean"},
+          "local_analysis_only": {"type": "boolean"},
+          "files_modified": {"type": "boolean"},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "passed": {"type": "boolean"}
+  }
+}

@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "profile_schema_version": 1,
+  "schema_version": 2,
+  "profile_schema_version": 2,
   "provider_id": "superpowers",
   "role_type": "formal",
   "version_detection": {
@@ -8,15 +8,16 @@
     "markers": [".codex/superpowers", "superpowers"],
     "version_files": ["VERSION", "package.json"]
   },
-  "tested_versions": ["v6.1.1"],
-  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "tested_versions": ["v6.2.0"],
+  "last_verified_at": "2026-07-27T00:00:00.000Z",
   "verification_evidence": [
     {
-      "version": "v6.1.1",
+      "version": "v6.2.0",
       "repository": "obra/superpowers",
       "repository_status": "active",
-      "release_url": "https://github.com/obra/superpowers/releases/tag/v6.1.1",
-      "scope": "artifact-contract-read-only",
+      "release_url": "https://github.com/obra/superpowers/releases/tag/v6.2.0",
+      "release_commit": "3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9",
+      "scope": "commands",
       "artifacts": [
         "skills/brainstorming/SKILL.md",
         "skills/writing-plans/SKILL.md",
@@ -26,13 +27,22 @@
       ]
     }
   ],
-  "supported_platforms": [],
+  "supported_platforms": ["codex", "claude-code"],
   "capabilities": ["brainstorming", "planning", "test-driven-development", "review", "verification"],
   "artifact_contracts": [
     {"capability": "planning", "ownership": "provider", "discovery": "repository instructions or active plan"},
     {"capability": "verification", "ownership": "provider", "discovery": "active workflow state"}
   ],
-  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "command_policy": {
+    "default": "deny",
+    "allowed_when_verified": [
+      "brainstorming",
+      "writing-plans",
+      "test-driven-development",
+      "requesting-code-review",
+      "verification-before-completion"
+    ]
+  },
   "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
   "blocking": {"repository_required_failure": true}
 }

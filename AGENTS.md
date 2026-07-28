@@ -16,7 +16,7 @@ This repository publishes the `agent-skill-maintainer` Agent Skill.
 - Use Node standard libraries and argument arrays for subprocesses; never construct shell commands from evidence.
 - Do not add a build step or require `npm install` for installed Skill execution.
 - Keep schema versions explicit and provide deterministic migration before changing persisted run state.
-- See [`.agents/architecture.md`](.agents/architecture.md), [the runtime ADR](.agents/adr/0001-node-runtime.md), [the branch-push ADR](.agents/adr/0002-deterministic-branch-push.md), [the Fork-creation ADR](.agents/adr/0003-deterministic-fork-creation.md), and [the local-update ADR](.agents/adr/0004-deterministic-local-skill-update.md).
+- See [`.agents/architecture.md`](.agents/architecture.md), [the runtime ADR](.agents/adr/0001-node-runtime.md), [the branch-push ADR](.agents/adr/0002-deterministic-branch-push.md), [the Fork-creation ADR](.agents/adr/0003-deterministic-fork-creation.md), [the local-update ADR](.agents/adr/0004-deterministic-local-skill-update.md), and [the stable-Provider ADR](.agents/adr/0005-stable-provider-validation.md).
 - Before changing repository guidance or its indexes, read [`.agents/documentation.md`](.agents/documentation.md).
 
 ## Hard boundaries

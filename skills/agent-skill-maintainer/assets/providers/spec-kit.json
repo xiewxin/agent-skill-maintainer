@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "profile_schema_version": 1,
+  "schema_version": 2,
+  "profile_schema_version": 2,
   "provider_id": "spec-kit",
   "role_type": "formal",
   "version_detection": {
@@ -8,15 +8,16 @@
     "markers": [".specify"],
     "version_files": [".specify/memory/constitution.md"]
   },
-  "tested_versions": ["v0.13.4"],
-  "last_verified_at": "2026-07-23T00:00:00.000Z",
+  "tested_versions": ["v0.14.2"],
+  "last_verified_at": "2026-07-27T00:00:00.000Z",
   "verification_evidence": [
     {
-      "version": "v0.13.4",
+      "version": "v0.14.2",
       "repository": "github/spec-kit",
       "repository_status": "active",
-      "release_url": "https://github.com/github/spec-kit/releases/tag/v0.13.4",
-      "scope": "artifact-contract-read-only",
+      "release_url": "https://github.com/github/spec-kit/releases/tag/v0.14.2",
+      "release_commit": "2930d06f41e3ab491ef7d111cfe7676de5ddeabd",
+      "scope": "commands",
       "artifacts": [
         "templates/spec-template.md",
         "templates/plan-template.md",
@@ -24,14 +25,22 @@
       ]
     }
   ],
-  "supported_platforms": [],
+  "supported_platforms": ["codex", "claude-code"],
   "capabilities": ["specification", "planning", "task-decomposition"],
   "artifact_contracts": [
     {"capability": "specification", "ownership": "provider", "discovery": "specs/*/spec.md"},
     {"capability": "planning", "ownership": "provider", "discovery": "specs/*/plan.md"},
     {"capability": "task-decomposition", "ownership": "provider", "discovery": "specs/*/tasks.md"}
   ],
-  "command_policy": {"default": "deny", "allowed_when_verified": []},
+  "command_policy": {
+    "default": "deny",
+    "allowed_when_verified": [
+      "speckit.specify",
+      "speckit.plan",
+      "speckit.tasks",
+      "speckit.analyze"
+    ]
+  },
   "fallback": {"missing": "unavailable", "unknown_version": "compatible-read-only", "breaking": "unsupported"},
   "blocking": {"repository_required_failure": true}
 }

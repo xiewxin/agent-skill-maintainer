@@ -6,7 +6,7 @@ Agent Skill Maintainer 檢視任務中實際發生的事情，而不只相信 Sk
 
 [English](README.md)
 
-> **Preview：** 本機分析、隔離候選實作、發布 gate、分別確認的 GitHub 個人 Fork／branch／PR／合併／Release apply，以及支援的全局 `npx skills` 安裝之精確 Release 本機更新路徑已完成實作。完整真實生命週期仍在驗證中。
+> **穩定版合同：** 本機分析、隔離候選實作、Provider 與發布 gate、分別確認的 GitHub 個人 Fork／branch／PR／合併／Release apply，以及支援的全局 `npx skills` 安裝之精確 Release 本機更新路徑均已驗證。每次遠端寫入、本機更新與清理仍是需要獨立確認的動作。
 
 ## 它能做什麼
 
@@ -89,7 +89,7 @@ Agent Skill Maintainer 補上的是完整維護閉環：
 
 ### 1. 安裝
 
-環境需具備 Node.js 22 以上版本與 `npx`。發布具 Tag 的 Preview 後，可使用：
+環境需具備 Node.js 22 以上版本與 `npx`。發布具 Tag 的版本後，可使用：
 
 ```bash
 npx skills add https://github.com/xiewxin/agent-skill-maintainer.git \
@@ -112,7 +112,7 @@ npx skills add https://github.com/xiewxin/agent-skill-maintainer.git \
 <details>
 <summary>展開本機生命週期、GitHub 動作與本機更新命令</summary>
 
-Preview 也提供本機確定性 CLI：
+Skill 也提供本機確定性 CLI：
 
 ```bash
 node skills/agent-skill-maintainer/scripts/maintainer.mjs start \
@@ -211,7 +211,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 
 </details>
 
-## 目前 Preview 狀態
+## 已驗證能力狀態
 
 已完成並通過本機測試：
 
@@ -230,15 +230,14 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 - 支援的全局 `npx-skills` 符號連結安裝可在獨立確認後，固定到已驗證 Release commit 進行 Skill／Lock 原子切換、回滾、proof 與唯讀 reconcile；
 - 已在受控臨時 HOME 完成兩個公開 Release 間的更新，並核對 Codex 規範內容、Claude Code 符號連結、精確 Lock `ref` 及官方 `skills check -g` 結果；
 - 從上一個 tag 到候選提交的完整 Release 說明覆蓋對帳；
-- 具原生 fallback 的保守 Provider Profile；
+- 五個固定版本的正式 Provider Profile，包含命令 allowlist、隔離真實使用證據、雙平台驗證與原生 fallback；
 - 公開發行、倉庫設定、遮罩及過程檔檢查。
 
-仍在驗證，尚未啟用或宣稱正式支援：
+本版本刻意不支援：
 
 - worktree 建立、組織擁有或自訂名稱的 Fork，以及 Fork 同步或刪除；目前隔離路徑使用本機 clone，貢獻模式只支援 active account 的個人 Fork；
 - 專案級、Copy 模式、Plugin、手動或未知安裝方式的本機 Skill 更新；
-- Provider 命令執行；
-- Codex／Claude Code 正式支援及完整真實 GitHub 生命週期。
+- 自主 GitHub 寫入、自動合併或發布、永久授權，以及候選資源清理。
 
 ## 安全與隱私
 
@@ -251,11 +250,11 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 
 ## 範圍與平台狀態
 
-Preview 只處理 GitHub 倉庫與 Agent Skills。GitLab、Bitbucket、背景掃描、永久授權、自動合併及自動發布不在範圍內。
+穩定版合同只處理 GitHub 倉庫與 Agent Skills。GitLab、Bitbucket、背景掃描、永久授權、自動合併及自動發布不在範圍內。
 
-候選已在隔離專案通過 Codex CLI `0.139.0` 與 Claude Code `2.1.152` 的安裝、正向觸發、負向不觸發、reference 讀取、穩定 ID、決策邊界及零檔案修改檢查。完整真實 GitHub 生命週期在獨立發布 gate 通過前仍維持 Preview。
+候選已在隔離專案通過 Codex CLI `0.139.0` 與 Claude Code `2.1.220` 的安裝、正向觸發、負向不觸發、Provider 選擇、產物橋接、fallback、穩定 ID、決策邊界及零檔案修改檢查。
 
-唯讀產物合同目前綁定 Superpowers `v6.1.1`、Spec Kit `v0.13.4`、OpenSpec `v1.6.0`、BMAD Method `v6.10.0`，以及已封存的 GSD `v1.42.3`。這不會授權執行 Provider 命令，也不代表端到端平台支援。未知版本仍只允許唯讀相容，未安裝則標示 unavailable。
+正式命令合同固定為 Superpowers `v6.2.0`、Spec Kit `v0.14.2`、OpenSpec `v1.6.0`、BMAD Method `v6.10.0` 與 Matt Pocock Skills `v1.1.0`。只有 Profile allowlist 內的命令可以使用，且必須同時存在具體能力缺口、唯一產物 owner、精確版本偵測，並對副作用另行確認。已封存的 GSD `v1.42.3` 保留為 legacy，永不授權命令。未知版本仍只允許唯讀相容，未安裝則標示 unavailable。
 
 ## 授權
 

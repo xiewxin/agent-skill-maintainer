@@ -7,13 +7,17 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import {
+  FORMAL_PROVIDER_IDS,
+  LEGACY_PROVIDER_IDS,
   publicationGate,
   loadProviderProfiles,
+  stableReleaseGate,
   validateDocument,
   validateEvidenceRecords,
   validateFeedbackRecords,
   validateOptimizationOutcome,
   validateOptimizationRecords,
+  validateProviderValidationAggregate,
 } from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
 import { fingerprintTree } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 
@@ -394,6 +398,41 @@ function loadLocalUpdateForwardAggregate() {
   });
 }
 
+/** Loads the publishable stable-Provider aggregate when it exists. */
+function loadProviderValidationAggregate() {
+  const currentSkillFingerprint = fingerprintTree(
+    resolve(ROOT, "skills", "agent-skill-maintainer"),
+  );
+  try {
+    const aggregate = JSON.parse(
+      readFileSync(
+        resolve(
+          ROOT,
+          "evals",
+          "evidence",
+          "provider-validation-v1.0.0.json",
+        ),
+        "utf8",
+      ),
+    );
+    return validateProviderValidationAggregate(aggregate, {
+      currentSkillFingerprint,
+    });
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return {
+      passed: false,
+      blockers: ["provider_validation_evidence_missing"],
+      candidate_skill_fingerprint: currentSkillFingerprint,
+      formal_provider_ids: [...FORMAL_PROVIDER_IDS],
+      case_provider_ids: [],
+      platform_ids: [],
+    };
+  }
+}
+
 /** Runs the selected evaluation suite. */
 export function main(argv = process.argv.slice(2)) {
   const suiteIndex = argv.indexOf("--suite");
@@ -500,23 +539,51 @@ export function main(argv = process.argv.slice(2)) {
   const profiles = loadProviderProfiles();
   const formalProfiles = Object.values(profiles)
     .filter((profile) => profile.role_type === "formal");
+  const legacyProfiles = Object.values(profiles)
+    .filter((profile) => profile.role_type === "legacy");
   const providerVersionValidationPassed =
-    formalProfiles.length === 5 &&
+    JSON.stringify(
+      formalProfiles.map((profile) => profile.provider_id).sort(),
+    ) === JSON.stringify([...FORMAL_PROVIDER_IDS].sort()) &&
+    JSON.stringify(
+      legacyProfiles.map((profile) => profile.provider_id).sort(),
+    ) === JSON.stringify([...LEGACY_PROVIDER_IDS].sort()) &&
     formalProfiles.every(
       (profile) =>
         profile.tested_versions.length > 0 &&
         profile.verification_evidence.length ===
           profile.tested_versions.length &&
         profile.verification_evidence.every(
-          (item) => item.scope === "artifact-contract-read-only",
+          (item) =>
+            ["artifact-contract-read-only", "commands"].includes(
+              item.scope,
+            ) &&
+            /^[a-f0-9]{40}$/u.test(item.release_commit),
         ) &&
+        profile.command_policy.allowed_when_verified.length > 0 &&
         Number.isFinite(Date.parse(profile.last_verified_at)),
     );
+  const providerCommandsAuthorized = formalProfiles.every(
+    (profile) =>
+      profile.verification_evidence.every(
+        (item) => item.scope === "commands",
+      ) &&
+      JSON.stringify([...profile.supported_platforms].sort()) ===
+        JSON.stringify(["claude-code", "codex"]),
+  );
   const forwardAggregate = loadForwardEvaluationAggregate();
   const forkForwardAggregate = loadForkForwardAggregate();
   const localUpdateForwardAggregate =
     loadLocalUpdateForwardAggregate();
-  const releaseBlockers = ["controlled_github_e2e_pending"];
+  const providerValidation = loadProviderValidationAggregate();
+  const stableGate = stableReleaseGate({
+    providerValidation,
+    expectedRepository: "xiewxin/agent-skill-maintainer",
+    expectedVersion: "1.0.0",
+    expectedCommit: "",
+    publicationProof: null,
+  });
+  const releaseBlockers = [...stableGate.blockers];
   if (!forwardFixtureContractPassed) {
     releaseBlockers.push("forward_fixture_contract_pending");
   }
@@ -545,19 +612,25 @@ export function main(argv = process.argv.slice(2)) {
   if (!providerVersionValidationPassed) {
     releaseBlockers.push("provider_version_validation_pending");
   }
+  if (!providerCommandsAuthorized) {
+    releaseBlockers.push("provider_command_validation_pending");
+  }
+  const stableCandidateReady =
+    triggerContractPassed &&
+    realUsageContractPassed &&
+    forwardFixtureContractPassed &&
+    forkForwardFixtureContractPassed &&
+    localUpdateForwardFixtureContractPassed &&
+    gate.allowed &&
+    forwardAggregate.forward.passed &&
+    forwardAggregate.platform.passed &&
+    forkForwardAggregate.passed &&
+    localUpdateForwardAggregate.passed &&
+    providerVersionValidationPassed &&
+    providerCommandsAuthorized &&
+    stableGate.stable_candidate_ready;
   const report = {
-    passed:
-      triggerContractPassed &&
-      realUsageContractPassed &&
-      forwardFixtureContractPassed &&
-      forkForwardFixtureContractPassed &&
-      localUpdateForwardFixtureContractPassed &&
-      gate.allowed &&
-      forwardAggregate.forward.passed &&
-      forwardAggregate.platform.passed &&
-      forkForwardAggregate.passed &&
-      localUpdateForwardAggregate.passed &&
-      providerVersionValidationPassed,
+    passed: stableCandidateReady,
     trigger_cases: cases.length,
     trigger_contract_passed: triggerContractPassed,
     redacted_real_usage_cases: 1,
@@ -571,16 +644,21 @@ export function main(argv = process.argv.slice(2)) {
     provider_version_validation: {
       passed: providerVersionValidationPassed,
       formal_profiles: formalProfiles.length,
-      scope: "artifact-contract-read-only",
-      commands_authorized: false,
+      legacy_profiles: legacyProfiles.length,
+      scope: "versioned-provider-contracts",
+      commands_authorized: providerCommandsAuthorized,
+      platforms_verified: providerCommandsAuthorized,
     },
+    provider_validation: providerValidation,
     agent_forward_evaluation: forwardAggregate.forward,
     platform_validation: forwardAggregate.platform,
     fork_forward_evaluation: forkForwardAggregate,
     local_update_forward_evaluation:
       localUpdateForwardAggregate,
-    release_ready: false,
-    release_blockers: releaseBlockers,
+    stable_candidate_ready: stableCandidateReady,
+    release_ready: stableCandidateReady,
+    publication_verified: stableGate.publication_verified,
+    release_blockers: [...new Set(releaseBlockers)],
   };
   process.stdout.write(`${JSON.stringify(report)}\n`);
   return report.passed ? 0 : 1;

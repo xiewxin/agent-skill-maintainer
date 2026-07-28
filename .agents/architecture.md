@@ -4,6 +4,8 @@
 
 The Skill is Markdown-first. `SKILL.md` routes the workflow and loads stage references only when needed. Deterministic scripts validate state, schemas, paths, fingerprints, repository relations, and publication gates; they do not decide whether evidence semantically proves a defect.
 
+Provider Profiles are versioned capability contracts. Five formal Providers may fill a proven workflow gap, auxiliary Providers may fill a distinct supporting gap, and archived legacy Providers remain read-only. An exact version is not enough to authorize commands: the matching Profile evidence must have `commands` scope, the requested command must be allowlisted, and the public stable aggregate must bind an isolated redacted real-usage case to the current Skill fingerprint. See [ADR 0005](adr/0005-stable-provider-validation.md).
+
 ## Runtime modules
 
 Runtime modules are native ECMAScript modules under `skills/agent-skill-maintainer/scripts/`. They use only supported Node standard libraries and require no `npm install`.
@@ -21,3 +23,5 @@ Branch push never reuses candidate remote or local transport configuration: it d
 Post-release local update is a separate trust boundary. It supports only a proven global `npx-skills` symlink installation, reads an exact verified GitHub Release commit, materializes regular blobs without executing them, and atomically switches both canonical Skill content and the v3 lock. Apply is state-bound and single-attempt; interruption uses read-only reconciliation, and failed postconditions restore the exact previous Skill and lock. See [ADR 0004](adr/0004-deterministic-local-skill-update.md).
 
 A missing deterministic apply path is a hard stop, not permission to improvise a shell command.
+
+Stable candidate readiness and official publication are separate states. The candidate gate may allow a Release preview before `v1.0.0` exists; only a verified official tag and Release proof can set publication verification afterward.

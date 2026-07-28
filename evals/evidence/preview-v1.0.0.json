@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-27T02:17:30.000Z",
+  "evaluated_at": "2026-07-27T10:16:50.000Z",
   "fixture": "synthetic/sample-cleanup",
-  "candidate_skill_fingerprint": "d96b06f3472394a0788fe046f4c5b48eefe6ad06dba71ab8a44641363f064674",
+  "candidate_skill_fingerprint": "ae837de374bb76e49899349107ad84128d3e32e843278042797521782b8bb444",
   "raw_outputs_published": false,
   "forward_evaluation": {
     "same_model_and_tools": true,
@@ -67,7 +67,7 @@
       },
       {
         "id": "claude-code",
-        "version": "2.1.152",
+        "version": "2.1.220",
         "explicit_trigger": true,
         "target_and_reference_read": true,
         "positive_analysis": true,

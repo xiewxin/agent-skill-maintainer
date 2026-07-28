@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "provider-validation-aggregate",
+  "evaluated_at": "2026-07-27T10:16:50.000Z",
+  "candidate_skill_fingerprint": "ae837de374bb76e49899349107ad84128d3e32e843278042797521782b8bb444",
+  "raw_outputs_published": false,
+  "local_installations_modified": false,
+  "cases": [
+    {
+      "provider_id": "superpowers",
+      "provider_version": "v6.2.0",
+      "release_commit": "3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9",
+      "evidence_kind": "controlled-redacted-real-usage",
+      "capability_gap": "verified remaining-work implementation planning",
+      "owner": "superpowers-writing-plan",
+      "required_access": "commands",
+      "command_ids": ["writing-plans"],
+      "artifact_kinds": ["planning"],
+      "artifact_fingerprint": "e8712122fa3aca823459db39cdf6dd9c921335f6fb8aeaac84af6157a955acb5",
+      "isolated_home": true,
+      "isolated_repository": true,
+      "primary_provider_installation_modified": false,
+      "remote_writes_executed": false,
+      "telemetry_disabled": true,
+      "fallback_validated": true,
+      "owner_unique": true,
+      "quality": {
+        "assessment_method": "manual-criteria-v1",
+        "baseline_score": 4,
+        "candidate_score": 5,
+        "max_score": 5,
+        "improvements": [
+          "verified remaining-work plan",
+          "real path and function grounding"
+        ],
+        "regressions": []
+      },
+      "cost": {
+        "elapsed_seconds": 807,
+        "tool_calls": 70,
+        "artifact_bytes": 49966
+      },
+      "safety_passed": true,
+      "passed": true
+    },
+    {
+      "provider_id": "spec-kit",
+      "provider_version": "v0.14.2",
+      "release_commit": "2930d06f41e3ab491ef7d111cfe7676de5ddeabd",
+      "evidence_kind": "controlled-redacted-real-usage",
+      "capability_gap": "traceable specification plan and task ownership",
+      "owner": "spec-kit-feature-workflow",
+      "required_access": "commands",
+      "command_ids": [
+        "speckit.specify",
+        "speckit.plan",
+        "speckit.tasks",
+        "speckit.analyze"
+      ],
+      "artifact_kinds": [
+        "specification",
+        "planning",
+        "task-decomposition"
+      ],
+      "artifact_fingerprint": "b9c93c162e6383bf81e79ca3371cfc6ab904febaffabdd54e6a5dbd39ad76074",
+      "isolated_home": true,
+      "isolated_repository": true,
+      "primary_provider_installation_modified": false,
+      "remote_writes_executed": false,
+      "telemetry_disabled": true,
+      "fallback_validated": true,
+      "owner_unique": true,
+      "quality": {
+        "assessment_method": "manual-criteria-v1",
+        "baseline_score": 4,
+        "candidate_score": 5,
+        "max_score": 5,
+        "improvements": [
+          "active feature traceability",
+          "cross-artifact consistency analysis"
+        ],
+        "regressions": []
+      },
+      "cost": {
+        "elapsed_seconds": 896,
+        "tool_calls": 129,
+        "artifact_bytes": 57761
+      },
+      "safety_passed": true,
+      "passed": true
+    },
+    {
+      "provider_id": "openspec",
+      "provider_version": "v1.6.0",
+      "release_commit": "e1b51d111ab446b54dee2d6159ac245f0339ae52",
+      "evidence_kind": "controlled-redacted-real-usage",
+      "capability_gap": "requirement scenario and change-artifact verification",
+      "owner": "openspec-change-workflow",
+      "required_access": "commands",
+      "command_ids": ["opsx:propose", "opsx:verify"],
+      "artifact_kinds": ["proposal", "design", "spec-delta"],
+      "artifact_fingerprint": "7aa85f197cb7c0e1c077b56e01f33247809396ca83554b95ba775ee807180499",
+      "isolated_home": true,
+      "isolated_repository": true,
+      "primary_provider_installation_modified": false,
+      "remote_writes_executed": false,
+      "telemetry_disabled": true,
+      "fallback_validated": true,
+      "owner_unique": true,
+      "quality": {
+        "assessment_method": "manual-criteria-v1",
+        "baseline_score": 4,
+        "candidate_score": 5,
+        "max_score": 5,
+        "improvements": [
+          "requirement and scenario contracts",
+          "artifact dependency verification",
+          "code and test mapping"
+        ],
+        "regressions": []
+      },
+      "cost": {
+        "elapsed_seconds": 390,
+        "tool_calls": 75,
+        "artifact_bytes": 19355
+      },
+      "safety_passed": true,
+      "passed": true
+    },
+    {
+      "provider_id": "bmad",
+      "provider_version": "v6.10.0",
+      "release_commit": "081e64ee5aab2316b912883f7bee528ee143ce36",
+      "evidence_kind": "controlled-redacted-real-usage",
+      "capability_gap": "stable capability identifiers and correction history",
+      "owner": "bmad-spec-workflow",
+      "required_access": "commands",
+      "command_ids": ["bmad-spec"],
+      "artifact_kinds": ["quick-flow"],
+      "artifact_fingerprint": "eca52b51fd6e10b24f42097dc7b99b2d3240d399448c75e2b7ac8780d0509f86",
+      "isolated_home": true,
+      "isolated_repository": true,
+      "primary_provider_installation_modified": false,
+      "remote_writes_executed": false,
+      "telemetry_disabled": true,
+      "fallback_validated": true,
+      "owner_unique": true,
+      "quality": {
+        "assessment_method": "manual-criteria-v1",
+        "baseline_score": 4,
+        "candidate_score": 5,
+        "max_score": 5,
+        "improvements": [
+          "stable capability identifiers",
+          "append-only decision history",
+          "verifiable correction closure"
+        ],
+        "regressions": []
+      },
+      "cost": {
+        "elapsed_seconds": 257,
+        "tool_calls": 43,
+        "artifact_bytes": 13360
+      },
+      "safety_passed": true,
+      "passed": true
+    },
+    {
+      "provider_id": "matt-pocock-skills",
+      "provider_version": "v1.1.0",
+      "release_commit": "d574778f94cf620fcc8ce741584093bc650a61d3",
+      "evidence_kind": "controlled-redacted-real-usage",
+      "capability_gap": "current-state specification and vertical ticket decomposition",
+      "owner": "matt-pocock-spec-ticket-workflow",
+      "required_access": "commands",
+      "command_ids": ["to-spec", "to-tickets"],
+      "artifact_kinds": [
+        "specification",
+        "vertical-ticket-decomposition"
+      ],
+      "artifact_fingerprint": "a314840440876eccb7f1832d26ce34bfd5ce6e0103104d94ae7c16f3bd89c3c8",
+      "isolated_home": true,
+      "isolated_repository": true,
+      "primary_provider_installation_modified": false,
+      "remote_writes_executed": false,
+      "telemetry_disabled": true,
+      "fallback_validated": true,
+      "owner_unique": true,
+      "quality": {
+        "assessment_method": "manual-criteria-v1",
+        "baseline_score": 4,
+        "candidate_score": 5,
+        "max_score": 5,
+        "improvements": [
+          "behavioral coverage",
+          "current-state vertical slices",
+          "parallel platform frontier",
+          "blocking graph",
+          "human checkpoint"
+        ],
+        "regressions": []
+      },
+      "cost": {
+        "elapsed_seconds": 447,
+        "tool_calls": 75,
+        "artifact_bytes": 24485
+      },
+      "safety_passed": true,
+      "passed": true
+    }
+  ],
+  "platforms": [
+    {
+      "id": "codex",
+      "version": "0.139.0",
+      "installation_validated": true,
+      "positive_trigger": true,
+      "negative_non_trigger": true,
+      "provider_selection": true,
+      "artifact_bridge": true,
+      "fallback": true,
+      "local_analysis_only": true,
+      "files_modified": false,
+      "passed": true
+    },
+    {
+      "id": "claude-code",
+      "version": "2.1.220",
+      "installation_validated": true,
+      "positive_trigger": true,
+      "negative_non_trigger": true,
+      "provider_selection": true,
+      "artifact_bridge": true,
+      "fallback": true,
+      "local_analysis_only": true,
+      "files_modified": false,
+      "passed": true
+    }
+  ],
+  "passed": true
+}

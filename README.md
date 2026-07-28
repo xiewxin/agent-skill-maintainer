@@ -6,7 +6,7 @@ Agent Skill Maintainer reviews what actually happened in a task—not just what 
 
 [繁體中文](README.zh-TW.md)
 
-> **Preview:** local analysis, isolated candidate implementation, release gates, separately confirmed GitHub personal Fork／branch／PR／merge／Release apply, and an exact-Release local update path for supported global `npx skills` installs are implemented. The complete live lifecycle is still being validated.
+> **Stable contract:** local analysis, isolated candidate implementation, Provider and release gates, separately confirmed GitHub personal Fork／branch／PR／merge／Release apply, and an exact-Release local update path for supported global `npx skills` installs are validated. Every remote write, local update, and cleanup remains a separately confirmed action.
 
 ## What can it do?
 
@@ -89,7 +89,7 @@ The workflow can use compatible planning or evaluation Providers when they fill 
 
 ### 1. Install
 
-Node.js 22 or later and `npx` are required. After a tagged Preview has been published:
+Node.js 22 or later and `npx` are required. After a tagged release has been published:
 
 ```bash
 npx skills add https://github.com/xiewxin/agent-skill-maintainer.git \
@@ -112,7 +112,7 @@ Specify the target Skill when known. Without one, the maintainer may show only c
 <details>
 <summary>Show local lifecycle, GitHub action, and local update commands</summary>
 
-The Preview also exposes a local deterministic CLI:
+The Skill also exposes a local deterministic CLI:
 
 ```bash
 node skills/agent-skill-maintainer/scripts/maintainer.mjs start \
@@ -211,7 +211,7 @@ For `managed`, branch push targets the verified repository. For `contribute`, it
 
 </details>
 
-## Current Preview status
+## Verified capability status
 
 Available and tested locally:
 
@@ -230,15 +230,14 @@ Available and tested locally:
 - separately confirmed local update for supported global `npx-skills` symlink installs, pinned to the verified Release commit with atomic Skill／Lock replacement, rollback, proof, and read-only reconciliation;
 - controlled temporary-HOME update from one public Release to the next, including Codex canonical content, Claude Code symlink, exact Lock `ref`, and the official `skills check -g` result;
 - complete previous-tag-to-candidate release-note coverage;
-- conservative Provider Profiles with a native fallback;
+- five fixed-version formal Provider Profiles with allowlisted commands, isolated real-usage evidence, dual-platform validation, and a native fallback;
 - publication, repository-settings, redaction, and process-artifact checks.
 
-Still being validated before it is enabled or claimed as supported:
+Intentionally unsupported in this version:
 
 - worktree creation, organization-owned or custom-named Forks, and Fork synchronization or deletion; the current isolated path uses a local clone and contributor mode supports only the active account's personal Fork;
 - project-scoped, copy-mode, plugin, manual, or unknown local Skill updates;
-- execution of Provider commands;
-- formal Codex or Claude Code support and the complete live GitHub lifecycle.
+- autonomous GitHub writes, automatic merge or release, permanent authorization, and candidate-resource cleanup.
 
 ## Safety and privacy
 
@@ -251,11 +250,11 @@ Still being validated before it is enabled or claimed as supported:
 
 ## Scope and platform status
 
-The Preview targets GitHub repositories and Agent Skills. GitLab, Bitbucket, autonomous background scans, permanent authorization, automatic merging, and automatic release are out of scope.
+The stable contract targets GitHub repositories and Agent Skills. GitLab, Bitbucket, autonomous background scans, permanent authorization, automatic merging, and automatic release are out of scope.
 
-The candidate passed isolated project installation, positive triggering, negative non-triggering, reference reading, stable-ID, decision-boundary, and no-file-mutation checks on Codex CLI `0.139.0` and Claude Code `2.1.152`. The complete live GitHub lifecycle remains Preview until its separate release gate passes.
+The candidate passed isolated project installation, positive triggering, negative non-triggering, Provider selection, artifact bridging, fallback, stable-ID, decision-boundary, and no-file-mutation checks on Codex CLI `0.139.0` and Claude Code `2.1.220`.
 
-The read-only artifact contracts are version-scoped to Superpowers `v6.1.1`, Spec Kit `v0.13.4`, OpenSpec `v1.6.0`, BMAD Method `v6.10.0`, and the archived GSD `v1.42.3`. This does not authorize Provider commands or claim end-to-end platform support. Unknown versions remain read-only; missing Providers are unavailable.
+Formal command-scoped Profiles are fixed to Superpowers `v6.2.0`, Spec Kit `v0.14.2`, OpenSpec `v1.6.0`, BMAD Method `v6.10.0`, and Matt Pocock Skills `v1.1.0`. Only each Profile's allowlisted commands may be used, and only after a concrete capability gap, unique artifact owner, exact-version detection, and separate confirmation of side effects. The archived GSD `v1.42.3` remains legacy and command-disabled. Unknown versions remain read-only; missing Providers are unavailable.
 
 ## License
 
