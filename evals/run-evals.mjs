@@ -579,7 +579,7 @@ export function main(argv = process.argv.slice(2)) {
   const stableGate = stableReleaseGate({
     providerValidation,
     expectedRepository: "xiewxin/agent-skill-maintainer",
-    expectedVersion: "1.0.0",
+    expectedVersion: "1.0.1",
     expectedCommit: "",
     publicationProof: null,
   });

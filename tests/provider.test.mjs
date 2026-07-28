@@ -348,7 +348,7 @@ test("stable candidate readiness does not depend on an existing release", () => 
     publicationProof: {
       schema_version: 1,
       repository: "example/agent-skill-maintainer",
-      version: "1.0.0",
+      version: "v1.0.0",
       tag: "v1.0.0",
       commit: "c".repeat(40),
       release_url:
@@ -358,6 +358,64 @@ test("stable candidate readiness does not depend on an existing release", () => 
   });
   assert.equal(published.stable_candidate_ready, true);
   assert.equal(published.publication_verified, true);
+
+  const prefixedExpected = stableReleaseGate({
+    providerValidation,
+    expectedRepository: "example/agent-skill-maintainer",
+    expectedVersion: "v1.0.0",
+    expectedCommit: "c".repeat(40),
+    publicationProof: {
+      schema_version: 1,
+      repository: "example/agent-skill-maintainer",
+      version: "1.0.0",
+      tag: "v1.0.0",
+      commit: "c".repeat(40),
+      release_url:
+        "https://github.com/example/agent-skill-maintainer/releases/tag/v1.0.0",
+      official: true,
+    },
+  });
+  assert.equal(prefixedExpected.publication_verified, true);
+});
+
+test("stable publication verification rejects version and identity drift", () => {
+  const profiles = verifiedProfiles();
+  const providerValidation = validateProviderValidationAggregate(
+    providerAggregate({}, profiles),
+    {
+      currentSkillFingerprint: FINGERPRINT,
+      profiles,
+    },
+  );
+  const proof = {
+    schema_version: 1,
+    repository: "example/agent-skill-maintainer",
+    version: "v1.0.0",
+    tag: "v1.0.0",
+    commit: "c".repeat(40),
+    release_url:
+      "https://github.com/example/agent-skill-maintainer/releases/tag/v1.0.0",
+    official: true,
+  };
+  const drifted = [
+    { publicationProof: { ...proof, version: "v1.0.1" } },
+    { publicationProof: { ...proof, tag: "v1.0.1" } },
+    { publicationProof: { ...proof, version: "vv1.0.0", tag: "vv1.0.0" } },
+    { publicationProof: { ...proof, commit: "d".repeat(40) } },
+    { publicationProof: { ...proof, repository: "example/other" } },
+    { publicationProof: { ...proof, official: false } },
+  ];
+  for (const { publicationProof } of drifted) {
+    const result = stableReleaseGate({
+      providerValidation,
+      expectedRepository: "example/agent-skill-maintainer",
+      expectedVersion: "1.0.0",
+      expectedCommit: "c".repeat(40),
+      publicationProof,
+    });
+    assert.equal(result.publication_verified, false);
+    assert.ok(result.blockers.includes("publication_proof_mismatch"));
+  }
 });
 
 test("public Provider aggregate schema is present and versioned", () => {
