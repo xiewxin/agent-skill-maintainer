@@ -111,6 +111,8 @@ const CHECK_CATEGORIES = new Set([
   "documentation",
 ]);
 const CHECK_STATUSES = new Set(["passed", "failed", "not-run"]);
+const RELEASE_VERSION_PATTERN =
+  /^v?(?<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?)$/u;
 const REQUIRED_CHECK_FIELDS = new Set([
   "id",
   "category",
@@ -1319,6 +1321,14 @@ export function validateProviderValidationAggregate(
   };
 }
 
+/** Normalizes one supported Release version while rejecting malformed prefixes. */
+function normalizeReleaseVersion(version) {
+  if (typeof version !== "string") {
+    return null;
+  }
+  return version.match(RELEASE_VERSION_PATTERN)?.groups?.version ?? null;
+}
+
 /** Separates pre-release candidate readiness from post-release verification. */
 export function stableReleaseGate({
   providerValidation,
@@ -1335,12 +1345,17 @@ export function stableReleaseGate({
   const blockers = [...(providerValidation.blockers ?? [])];
   if (publicationProof !== null && publicationProof !== undefined) {
     validateDocument("publication-proof", publicationProof);
+    const expectedNormalized = normalizeReleaseVersion(expectedVersion);
+    const proofNormalized = normalizeReleaseVersion(
+      publicationProof.version,
+    );
     publicationVerified =
       stableCandidateReady &&
+      expectedNormalized !== null &&
+      proofNormalized === expectedNormalized &&
       publicationProof.official === true &&
       publicationProof.repository === expectedRepository &&
-      publicationProof.version === expectedVersion &&
-      publicationProof.tag === `v${expectedVersion}` &&
+      publicationProof.tag === `v${expectedNormalized}` &&
       publicationProof.commit === expectedCommit;
     if (!publicationVerified) {
       blockers.push("publication_proof_mismatch");
