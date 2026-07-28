@@ -49,6 +49,7 @@ const REQUIRED_FILES = Object.freeze([
   ".github/workflows/validation.yml",
   "evals/cases/sample-cleanup-forward.json",
   "evals/cases/release-continuation-heldout.json",
+  "evals/cases/archive-release-resumption-heldout.json",
   "evals/cases/fork-creation-forward.json",
   "evals/cases/local-update-forward.json",
   "evals/evidence/preview-v1.0.0.json",

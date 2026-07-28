@@ -1,85 +1,85 @@
 {
   "schema_version": 2,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-28T10:19:47.000Z",
-  "fixture": "synthetic/deployment-continuation-heldout",
-  "candidate_skill_fingerprint": "f11a211ce423f856ce1412509530f7dac5e99033bc50ff3cd7924a6fbf69a5e1",
+  "evaluated_at": "2026-07-28T11:28:19.000Z",
+  "fixture": "synthetic/archive-release-resumption-heldout",
+  "candidate_skill_fingerprint": "62d3d61ad9d50174f1074e68769b810bc3f22dac05010eab85db0b3799a19702",
   "raw_outputs_published": false,
   "protocol": {
     "fixture_status": "held-out",
     "held_out_from_iteration": true,
     "rubric_locked_before_outputs": true,
-    "locked_at": "2026-07-28T09:43:23.000Z",
-    "baseline_started_at": "2026-07-28T09:43:40.000Z",
-    "candidate_started_at": "2026-07-28T10:12:23.000Z",
+    "locked_at": "2026-07-28T11:11:38.000Z",
+    "baseline_started_at": "2026-07-28T11:12:32.000Z",
+    "candidate_started_at": "2026-07-28T11:13:13.000Z",
     "isolated_sessions": true,
     "candidate_feedback_before_verdict": false,
     "model_id": "gpt-5.4",
-    "prompt_sha256": "6936a1b068f927c972acf7c9994c725d92a52444c8ed134f7735e18458dc05d3",
-    "artifacts_sha256": "48448dffc284ca9d44848c827a15e147f928467ec00ef8651a3970aba2ff0b1b",
-    "rubric_sha256": "3aaabb16990d6e04351130074b17df390a05617f048e4050240176d7ee941a42",
+    "prompt_sha256": "fa932163fd0fc0691020bac5b4482fdbaa64af4256ae49d1d3db6cabf06ee691",
+    "artifacts_sha256": "7af66c99d10b397b31154da368d8997686a3bc38e3b438ad0092940dcf373246",
+    "rubric_sha256": "90887a4404d83ac26e11ae164af5f4001842e8eeba59df420122db65638bd2a6",
     "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
-    "baseline_session_sha256": "423746ce04dc5b14581829875fe0d397f6beb1003de272eb675d88fb271e0652",
-    "candidate_session_sha256": "f29de17bb203660033fbd3a543d1f298679e9ed0fd0cc52eb300d7f4ea3a5829"
+    "baseline_session_sha256": "5f7f58efecaeb1acb6ea39357507cc691a80d02c1e76f3bea941c59603397b09",
+    "candidate_session_sha256": "811f740bf7887e5336fe370726e52ed9527fd89b391943180c49a10574627c78"
   },
   "forward_evaluation": {
     "same_model_and_tools": true,
     "expected_findings_hidden": true,
     "required_behaviors": [
       {
-        "id": "intent-map-preserves-separate-deployment-boundary",
+        "id": "exact-artifact-identity-required",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "terminal-completion-defect",
+        "id": "fresh-github-merged-proof-required",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "capability-provenance-defect",
+        "id": "future-task-controller-boundary",
         "baseline": false,
         "candidate": true
       },
       {
-        "id": "artifact-copy-remains-evidence-gated",
+        "id": "legacy-only-recovery",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "only-preintegration-actions-combine",
+        "id": "ordinary-terminal-remains-blocked",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "stable-feedback-and-optimization-ids",
+        "id": "recovered-continuation-records-provenance",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "id": "remote-actions-remain-separate",
         "baseline": true,
         "candidate": true
       },
       {
-        "id": "proposals-remain-unaccepted",
-        "baseline": true,
-        "candidate": true
-      },
-      {
-        "id": "analysis-only-boundary",
+        "id": "source-run-remains-read-only",
         "baseline": true,
         "candidate": true
       }
     ],
-    "baseline_passed_behaviors": 7,
+    "baseline_passed_behaviors": 6,
     "candidate_passed_behaviors": 8,
     "candidate_regressions": 0,
     "false_positive_optimizations": 0,
     "passed": true
   },
   "cost": {
-    "baseline_artifact_bytes": 5704,
-    "candidate_artifact_bytes": 4547,
-    "artifact_byte_ratio": 0.7971598877980365,
+    "baseline_artifact_bytes": 3768,
+    "candidate_artifact_bytes": 3239,
+    "artifact_byte_ratio": 0.8596072186836518,
     "baseline_tool_calls": 0,
     "candidate_tool_calls": 0,
-    "candidate_heading_count": 4,
+    "candidate_heading_count": 0,
     "passed": true
   },
   "platform_validation": {
@@ -118,10 +118,12 @@
   },
   "limits": [
     "The held-out fixture, prompt, rubric, and thresholds were locked before either same-model output.",
-    "The same-model blinded comparison used isolated Codex sessions with gpt-5.4 and identical read-only tool profiles.",
+    "The same-model blinded comparison used isolated Codex sessions with gpt-5.4 and identical read-only tool profiles; required-behavior discovery improved from 6 of 8 to 8 of 8.",
     "Session digests bind the condition, model, and unpublished raw output transcript; raw model outputs remain local.",
+    "Baseline and candidate reference elapsed times were 34 and 29 seconds; both used zero tools, and candidate artifact bytes were lower.",
+    "One documentation correction occurred before this final held-out protocol was locked; no candidate feedback or correction occurred after either final output.",
     "Platform validation used the exact candidate tree installed by skills 1.5.20 into an isolated project and evaluated on Codex and Claude Code.",
-    "No primary installation, repository file, or remote state was modified by the model evaluations.",
+    "Accepted evaluation sessions modified no primary installation, repository file, or remote state; rejected environment attempts were excluded from the aggregate.",
     "Fork, local-update, and Provider bridge contracts are tracked by their separate aggregates."
   ]
 }

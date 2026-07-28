@@ -35,14 +35,14 @@ const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
   "target-intent-preserved",
 ]);
 const REQUIRED_HELDOUT_BEHAVIOR_IDS = Object.freeze([
-  "analysis-only-boundary",
-  "artifact-copy-remains-evidence-gated",
-  "capability-provenance-defect",
-  "intent-map-preserves-separate-deployment-boundary",
-  "only-preintegration-actions-combine",
-  "proposals-remain-unaccepted",
-  "stable-feedback-and-optimization-ids",
-  "terminal-completion-defect",
+  "exact-artifact-identity-required",
+  "fresh-github-merged-proof-required",
+  "future-task-controller-boundary",
+  "legacy-only-recovery",
+  "ordinary-terminal-remains-blocked",
+  "recovered-continuation-records-provenance",
+  "remote-actions-remain-separate",
+  "source-run-remains-read-only",
 ]);
 const REQUIRED_FORK_BEHAVIOR_IDS = Object.freeze([
   "confirmed-create-exactly-one-post",
@@ -111,7 +111,7 @@ export function validateHeldoutForwardFixture(fixture) {
   const cost = fixture?.cost_thresholds;
   return (
     fixture?.schema_version === 1 &&
-    fixture?.id === "synthetic/deployment-continuation-heldout" &&
+    fixture?.id === "synthetic/archive-release-resumption-heldout" &&
     Number.isFinite(Date.parse(fixture?.locked_at)) &&
     targetFiles !== null &&
     typeof targetFiles === "object" &&
@@ -121,7 +121,7 @@ export function validateHeldoutForwardFixture(fixture) {
       (content) => typeof content === "string" && content.length > 0,
     ) &&
     typeof fixture?.prompt === "string" &&
-    fixture.prompt.includes("`deployment-conductor`") &&
+    fixture.prompt.includes("`artifact-publisher`") &&
     Array.isArray(fixture?.usage_evidence) &&
     fixture.usage_evidence.length === 4 &&
     JSON.stringify(behaviorIds) ===
@@ -346,7 +346,7 @@ export function validateForwardEvaluationAggregate(
           ROOT,
           "evals",
           "cases",
-          "release-continuation-heldout.json",
+          "archive-release-resumption-heldout.json",
         ),
         "utf8",
       ),
@@ -616,7 +616,7 @@ export function main(argv = process.argv.slice(2)) {
         ROOT,
         "evals",
         "cases",
-        "release-continuation-heldout.json",
+        "archive-release-resumption-heldout.json",
       ),
       "utf8",
     ),

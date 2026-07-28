@@ -194,6 +194,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs publication-continue \
   --binding-id "$BINDING_ID" --merge-proof merge-proof.json
 ```
 
+For a migrated pre-v8 `legacy_completed` run, this command is also the only supported recovery path. It first requires the persisted candidate, validation, and PR proof, then re-reads the merged PR and compares its repository, number, base, candidate head, and merge commit with the detached proof. Recovery migrates the source only in memory and leaves that terminal audit record unchanged; the new continuation records source-state, merge-proof, and live-verification fingerprints. Any mismatch stops before a continuation run or lease is created; no merge or other remote write is repeated.
+
 After an official publication proof exists, a supported local update uses its own preview, approval, lifecycle transition, apply, and read-only reconcile:
 
 ```bash

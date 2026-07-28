@@ -30,7 +30,10 @@ import {
   validatePrReadyValidation,
 } from "./core.mjs";
 import { verifyReleaseNoteCoverageProof } from "./git.mjs";
-import { verifyGithubActionApproval } from "./github.mjs";
+import {
+  verifyGithubActionApproval,
+  verifyLegacyPublicationMerge,
+} from "./github.mjs";
 import { verifyLocalUpdateApproval } from "./update.mjs";
 
 export class InvalidStateTransition extends Error {
@@ -436,7 +439,11 @@ export function createRun(
 }
 
 /** Reads, migrates, and validates an existing run state. */
-export function readRun(stateRoot, runId) {
+export function readRun(
+  stateRoot,
+  runId,
+  { persistMigration = true } = {},
+) {
   const path = runPath(resolve(stateRoot), runId);
   let loaded;
   try {
@@ -472,7 +479,27 @@ export function readRun(stateRoot, runId) {
   for (const reconciliation of document.local_update_reconciliations) {
     validateDocument("local-update-reconciliation", reconciliation);
   }
-  if (migrated) {
+  if (
+    document.continuation?.source_completion_kind ===
+      "legacy_completed" &&
+    typeof document.continuation
+      .legacy_merge_verification_fingerprint !== "string"
+  ) {
+    throw new Error(
+      "Legacy publication continuation 缺少唯讀 merge verification",
+    );
+  }
+  if (
+    document.continuation
+      ?.legacy_merge_verification_fingerprint !== undefined &&
+    document.continuation.source_completion_kind !==
+      "legacy_completed"
+  ) {
+    throw new Error(
+      "Legacy merge verification 不可綁定一般 publication continuation",
+    );
+  }
+  if (migrated && persistMigration) {
     atomicWriteJson(path, document);
   }
   return document;
@@ -487,9 +514,14 @@ export function createPublicationContinuation(
     bindingId,
     mergeProof,
   },
+  { githubRunner } = {},
 ) {
   const root = resolve(stateRoot);
-  const source = readRun(root, sourceRunId);
+  const source = readRun(
+    root,
+    sourceRunId,
+    { persistMigration: false },
+  );
   const safeBindingId = safeComponent(bindingId, "binding_id");
   if (runId === sourceRunId || existsSync(runPath(root, runId))) {
     throw new Error(`run 已存在或與來源重複：${runId}`);
@@ -497,36 +529,95 @@ export function createPublicationContinuation(
   if (
     source.status !== "completed" ||
     source.phase !== "completed" ||
-    source.binding_id !== safeBindingId ||
-    source.completion_disposition?.kind !== "stop_after_merge" ||
-    source.completion_disposition?.after_phase !== "merge"
+    source.binding_id !== safeBindingId
   ) {
     throw new InvalidStateTransition(
-      "只有明確 stop_after_merge 的 terminal run 可續接發布",
+      "只有相同 binding 的 terminal run 可續接發布",
+    );
+  }
+  const standardContinuation =
+    source.completion_disposition?.kind === "stop_after_merge" &&
+    source.completion_disposition?.after_phase === "merge";
+  const legacyContinuation =
+    source.completion_disposition?.kind === "legacy_completed" &&
+    source.completion_disposition?.after_phase === "unknown";
+  if (!standardContinuation && !legacyContinuation) {
+    throw new InvalidStateTransition(
+      "只有明確 stop_after_merge 或可驗證 legacy_completed 的 terminal run 可續接發布",
     );
   }
   validateDocument("merge-proof", mergeProof);
-  validateDocument("merge-proof", source.merge_proof);
-  if (canonicalJson(mergeProof) !== canonicalJson(source.merge_proof)) {
-    throw new InvalidStateTransition(
-      "提供的 merge proof 與來源 run 不一致",
-    );
-  }
-  validateRunCandidate(source);
+  const candidate = validateRunCandidate(source);
   validateDocument("pr-proof", source.pr_proof);
   if (
-    source.merge_proof.repository !== source.target?.repository ||
-    source.merge_proof.pr_number !== source.pr_proof.number ||
-    source.merge_proof.default_branch !== source.pr_proof.base_branch
+    source.pr_proof.repository !== source.target?.repository ||
+    source.pr_proof.head_commit !==
+      candidate.repository_snapshot.head_commit ||
+    source.pr_proof.base_branch !==
+      candidate.repository_snapshot.base_ref
   ) {
     throw new InvalidStateTransition(
-      "來源 run 的 merge、PR 與 repository 證明不一致",
+      "來源 run 的候選、PR 與 repository 證明不一致",
     );
+  }
+  let resolvedMergeProof;
+  let legacyMergeVerificationFingerprint;
+  if (standardContinuation) {
+    validateDocument("merge-proof", source.merge_proof);
+    if (canonicalJson(mergeProof) !== canonicalJson(source.merge_proof)) {
+      throw new InvalidStateTransition(
+        "提供的 merge proof 與來源 run 不一致",
+      );
+    }
+    resolvedMergeProof = clone(source.merge_proof);
+  } else {
+    if (source.merge_proof !== undefined) {
+      throw new InvalidStateTransition(
+        "Legacy terminal run 已含 merge proof，不能使用外部恢復路徑",
+      );
+    }
+    const validation = validatePrReadyValidation(
+      source.validation_summary,
+      candidate,
+    );
+    const documentationImpact = validation.checks.find(
+      (check) => check.category === "documentation",
+    ).details;
+    validatePrProofContract(
+      source.pr_proof,
+      documentationImpact,
+      {
+        repository: source.target.repository,
+        baseBranch: candidate.repository_snapshot.base_ref,
+        headCommit: candidate.repository_snapshot.head_commit,
+      },
+    );
+    const verification = verifyLegacyPublicationMerge(
+      {
+        repository: source.target.repository,
+        prProof: source.pr_proof,
+        mergeProof,
+      },
+      { runner: githubRunner },
+    );
+    resolvedMergeProof = verification.merge_proof;
+    legacyMergeVerificationFingerprint =
+      verification.verification_fingerprint;
   }
 
   return withBindingLock(root, safeBindingId, () => {
     if (existsSync(runPath(root, runId))) {
       throw new Error(`run 已存在：${runId}`);
+    }
+    const currentSource = readRun(
+      root,
+      sourceRunId,
+      { persistMigration: false },
+    );
+    if (canonicalJson(currentSource) !== canonicalJson(source)) {
+      throw new InvalidStateTransition(
+        "來源 terminal run 已漂移，必須重新驗證",
+      );
     }
     const leaseCreated = claimImplementationLease(
       root,
@@ -556,12 +647,20 @@ export function createPublicationContinuation(
         candidate_snapshot: clone(source.candidate_snapshot),
         validation_summary: clone(source.validation_summary),
         pr_proof: clone(source.pr_proof),
-        merge_proof: clone(source.merge_proof),
+        merge_proof: clone(resolvedMergeProof),
         continuation: {
           schema_version: 1,
           source_run_id: sourceRunId,
           source_state_fingerprint: fingerprint(source),
           merge_proof_fingerprint: fingerprint(mergeProof),
+          source_completion_kind:
+            source.completion_disposition.kind,
+          ...(legacyMergeVerificationFingerprint === undefined
+            ? {}
+            : {
+                legacy_merge_verification_fingerprint:
+                  legacyMergeVerificationFingerprint,
+              }),
         },
       };
       validateDocument("run-state", document);
