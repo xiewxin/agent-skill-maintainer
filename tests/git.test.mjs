@@ -37,6 +37,7 @@ import {
   applyGithubAction,
   buildGithubActionApproval,
   buildGithubActionPreview,
+  inspectGithubRepositoryCapabilities,
   reconcileGithubAction,
   verifyGithubActionApproval,
   verifyGithubActionPreview,
@@ -45,6 +46,7 @@ import {
   branchPushGithubRunner,
   createBranchPushFixture,
   createIsolationFixture,
+  githubCapability,
   initializeRepository,
   localRemoteGitRunner,
   optimizationFixture,
@@ -97,7 +99,11 @@ function branchPushState(
       head_repository: headRepository,
       operation,
     },
-    release_enabled: false,
+    capability_proof: githubCapability({
+      account,
+      relationship,
+      defaultBranch: repository.base_ref,
+    }),
     provider_contract_hash: "provider123",
   };
 }
@@ -1080,6 +1086,294 @@ test("managed branch push fast-forwards or verifies the approved existing commit
   }
 });
 
+test("publish_pr uses one approval and preserves a push-only partial proof", () => {
+  const fixture = createBranchPushFixture();
+  const remote = resolve(fixture.root, "publish-pr.git");
+  try {
+    runGit(fixture.root, "clone", "--bare", fixture.candidate, remote);
+    runGit(
+      remote,
+      "update-ref",
+      "-d",
+      `refs/heads/${fixture.branch}`,
+    );
+    const state = {
+      ...branchPushState(fixture),
+      action_target: {
+        ...branchPushState(fixture).action_target,
+        title: "Publish the verified workflow",
+        body: "Includes the approved contract and regressions.",
+        draft: false,
+      },
+    };
+    const preview = buildGithubActionPreview("publish_pr", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    const baseRunner = branchPushGithubRunner(state);
+    let createCount = 0;
+    const runner = (arguments_, options) => {
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] ===
+          `repos/example/skill/commits/${encodeURIComponent(fixture.branch)}`
+      ) {
+        return {
+          status: 0,
+          stdout: `${state.head_commit}\n`,
+          stderr: "",
+        };
+      }
+      if (arguments_[0] === "pr" && arguments_[1] === "create") {
+        createCount += 1;
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "simulated PR transport failure",
+        };
+      }
+      if (arguments_[0] === "pr" && arguments_[1] === "list") {
+        return { status: 0, stdout: "[]", stderr: "" };
+      }
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] === "--method"
+      ) {
+        return { status: 0, stdout: "[]", stderr: "" };
+      }
+      return baseRunner(arguments_, options);
+    };
+    const result = applyGithubAction(preview, approval, {
+      now: "2026-07-24T08:10:00.000Z",
+      runner,
+      gitRunner: localRemoteGitRunner(
+        new Map([
+          ["https://github.com/example/skill.git", remote],
+        ]),
+      ),
+      candidatePath: fixture.candidate,
+      candidateSnapshot: fixture.candidateSnapshot,
+      temporaryRoot: fixture.root,
+      documentationImpact: DOCUMENTATION_IMPACT,
+    });
+    assert.equal(createCount, 1);
+    assert.equal(result.action, "publish_pr");
+    assert.equal(result.status, "partial");
+    assert.equal(result.proof.status, "partial");
+    assert.equal(result.proof.pr_proof, null);
+    assert.equal(
+      result.proof.branch_push_proof.commit,
+      state.head_commit,
+    );
+    assert.equal(result.reconciliation.status, "partial");
+    assert.equal(
+      runGit(
+        remote,
+        "rev-parse",
+        `refs/heads/${fixture.branch}`,
+      ),
+      state.head_commit,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("publish_pr keeps an unobservable PR pending after the verified push", () => {
+  const fixture = createBranchPushFixture();
+  const remote = resolve(fixture.root, "publish-pr-pending.git");
+  try {
+    runGit(fixture.root, "clone", "--bare", fixture.candidate, remote);
+    runGit(
+      remote,
+      "update-ref",
+      "-d",
+      `refs/heads/${fixture.branch}`,
+    );
+    const state = {
+      ...branchPushState(fixture),
+      action_target: {
+        ...branchPushState(fixture).action_target,
+        title: "Publish the verified workflow",
+        body: "Includes the approved contract and regressions.",
+        draft: false,
+      },
+    };
+    const preview = buildGithubActionPreview("publish_pr", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    const baseRunner = branchPushGithubRunner(state);
+    const runner = (arguments_, options) => {
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] ===
+          `repos/example/skill/commits/${encodeURIComponent(fixture.branch)}`
+      ) {
+        return {
+          status: 0,
+          stdout: `${state.head_commit}\n`,
+          stderr: "",
+        };
+      }
+      if (arguments_[0] === "pr" && arguments_[1] === "create") {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "simulated PR transport failure",
+        };
+      }
+      if (arguments_[0] === "pr" && arguments_[1] === "list") {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "simulated PR observation failure",
+        };
+      }
+      return baseRunner(arguments_, options);
+    };
+    const result = applyGithubAction(preview, approval, {
+      now: "2026-07-24T08:10:00.000Z",
+      runner,
+      gitRunner: localRemoteGitRunner(
+        new Map([
+          ["https://github.com/example/skill.git", remote],
+        ]),
+      ),
+      candidatePath: fixture.candidate,
+      candidateSnapshot: fixture.candidateSnapshot,
+      temporaryRoot: fixture.root,
+      documentationImpact: DOCUMENTATION_IMPACT,
+    });
+
+    assert.equal(result.status, "pending");
+    assert.equal(result.reconciliation.status, "pending");
+    assert.equal(result.proof.status, "partial");
+    assert.equal(result.proof.pr_proof, null);
+    assert.equal(
+      result.proof.branch_push_proof.commit,
+      state.head_commit,
+    );
+    assert.match(result.guidance, /不得.*建立新 PR/u);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("publish_pr verifies both the exact pushed branch and created Pull Request", () => {
+  const fixture = createBranchPushFixture();
+  const remote = resolve(fixture.root, "publish-pr-success.git");
+  try {
+    runGit(fixture.root, "clone", "--bare", fixture.candidate, remote);
+    runGit(
+      remote,
+      "update-ref",
+      "-d",
+      `refs/heads/${fixture.branch}`,
+    );
+    const state = {
+      ...branchPushState(fixture),
+      action_target: {
+        ...branchPushState(fixture).action_target,
+        title: "Publish the verified workflow",
+        body: "Includes the approved contract and regressions.",
+        draft: false,
+      },
+    };
+    const preview = buildGithubActionPreview("publish_pr", state);
+    const approval = buildGithubActionApproval(preview, {
+      confirmedAt: "2026-07-24T08:00:00.000Z",
+      expiresAt: "2026-07-24T08:15:00.000Z",
+    });
+    const baseRunner = branchPushGithubRunner(state);
+    let createCount = 0;
+    const runner = (arguments_, options) => {
+      const key = arguments_.slice(0, 3).join(" ");
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] ===
+          `repos/example/skill/commits/${encodeURIComponent(fixture.branch)}`
+      ) {
+        return {
+          status: 0,
+          stdout: `${state.head_commit}\n`,
+          stderr: "",
+        };
+      }
+      if (key === "pr create --repo") {
+        createCount += 1;
+        return {
+          status: 0,
+          stdout: "https://github.com/example/skill/pull/7\n",
+          stderr: "",
+        };
+      }
+      if (key === "pr view 7") {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            number: 7,
+            url: "https://github.com/example/skill/pull/7",
+            baseRefName: state.base_branch,
+            headRefOid: state.head_commit,
+            headRepository: { nameWithOwner: "example/skill" },
+            state: "OPEN",
+            isDraft: false,
+            statusCheckRollup: [],
+            title: state.action_target.title,
+            body: state.action_target.body,
+          }),
+          stderr: "",
+        };
+      }
+      return baseRunner(arguments_, options);
+    };
+    const result = applyGithubAction(preview, approval, {
+      now: "2026-07-24T08:10:00.000Z",
+      runner,
+      gitRunner: localRemoteGitRunner(
+        new Map([
+          ["https://github.com/example/skill.git", remote],
+        ]),
+      ),
+      candidatePath: fixture.candidate,
+      candidateSnapshot: fixture.candidateSnapshot,
+      temporaryRoot: fixture.root,
+      documentationImpact: DOCUMENTATION_IMPACT,
+    });
+
+    assert.equal(createCount, 1);
+    assert.equal(result.action, "publish_pr");
+    assert.equal(result.status, "applied");
+    assert.equal(
+      result.url,
+      "https://github.com/example/skill/pull/7",
+    );
+    assert.equal(result.proof.status, "applied");
+    assert.equal(
+      result.proof.branch_push_proof.commit,
+      state.head_commit,
+    );
+    assert.equal(result.proof.pr_proof.number, 7);
+    assert.equal(
+      result.proof.pr_proof.head_commit,
+      state.head_commit,
+    );
+    assert.equal(
+      runGit(
+        remote,
+        "rev-parse",
+        `refs/heads/${fixture.branch}`,
+      ),
+      state.head_commit,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("branch push removes temporary Git configuration after a Git failure", () => {
   const fixture = createBranchPushFixture();
   const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-auth-"));
@@ -1220,6 +1514,7 @@ test("contributor branch push blocks a missing or unrelated fork before Git acce
           ...state,
           relationship: "managed",
           account: "example-user",
+          capability_proof: githubCapability(),
           action_target: {
             ...state.action_target,
             head_repository: "contributor/skill",
@@ -1668,7 +1963,7 @@ test("GitHub previews are stable and drift-bound", () => {
       draft: false,
       head_repository: "example/skill",
     },
-    release_enabled: false,
+    capability_proof: githubCapability(),
     provider_contract_hash: "provider123",
   };
   const preview = buildGithubActionPreview("pr_create", state);
@@ -1732,6 +2027,98 @@ test("GitHub previews are stable and drift-bound", () => {
   );
 });
 
+test("GitHub capability inspection derives Release eligibility from live evidence", () => {
+  const calls = [];
+  const proof = inspectGithubRepositoryCapabilities(
+    "example/skill",
+    {
+      now: "2026-07-28T08:00:00.000Z",
+      runner: (arguments_) => {
+        calls.push(arguments_);
+        if (arguments_[0] === "api" && arguments_[1] === "user") {
+          return {
+            status: 0,
+            stdout: "example-user\n",
+            stderr: "",
+          };
+        }
+        if (arguments_[0] === "repo") {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              nameWithOwner: "example/skill",
+              viewerPermission: "ADMIN",
+              defaultBranchRef: { name: "main" },
+            }),
+            stderr: "",
+          };
+        }
+        if (
+          arguments_[0] === "api" &&
+          arguments_[1] ===
+            "repos/example/skill/immutable-releases"
+        ) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ enabled: true }),
+            stderr: "",
+          };
+        }
+        throw new Error(`unexpected call: ${arguments_.join(" ")}`);
+      },
+    },
+  );
+  assert.equal(proof.relationship, "managed");
+  assert.equal(proof.release_enabled, true);
+  assert.equal(proof.immutable_releases, true);
+  assert.equal(proof.fingerprint.length, 64);
+  assert.equal(calls.length, 3);
+  assert.throws(
+    () =>
+      buildGithubActionPreview("release", {
+        run_id: "run-001",
+        binding_id: "binding-001",
+        account: "example-user",
+        repository: "example/skill",
+        relationship: "managed",
+        base_branch: "main",
+        base_commit: "a".repeat(40),
+        head_branch: "main",
+        head_commit: "a".repeat(40),
+        diff_hash: "d".repeat(64),
+        action_target: {
+          version: "v1.2.0",
+          title: "v1.2.0",
+          notes: "",
+          draft: false,
+          prerelease: false,
+          release_note_coverage: {
+            schema_version: 1,
+            previous_ref: "v1.1.0",
+            previous_commit: "b".repeat(40),
+            candidate_ref: "main",
+            candidate_commit: "a".repeat(40),
+            commit_ids: ["a".repeat(40)],
+            pull_request_numbers: [1],
+            accepted_optimization_ids: ["OPT-001"],
+            mappings: [],
+            uncovered_commits: [],
+            uncovered_pull_requests: [],
+            uncovered_optimizations: [],
+            complete: true,
+            fingerprint: "f".repeat(64),
+          },
+        },
+        capability_proof: {
+          ...proof,
+          release_enabled: false,
+        },
+        provider_contract_hash: "provider123",
+      }),
+    /fingerprint/u,
+  );
+});
+
 test("GitHub apply revalidates remote state and uses argument-safe gh commands", () => {
   const state = {
     run_id: "run-001",
@@ -1750,7 +2137,7 @@ test("GitHub apply revalidates remote state and uses argument-safe gh commands",
       draft: false,
       head_repository: "example/skill",
     },
-    release_enabled: false,
+    capability_proof: githubCapability(),
     provider_contract_hash: "provider123",
   };
   const preview = buildGithubActionPreview("pr_create", state);
@@ -1863,7 +2250,7 @@ test("GitHub apply refuses account, commit, approval, and relationship drift", (
       draft: true,
       head_repository: "example/skill",
     },
-    release_enabled: false,
+    capability_proof: githubCapability(),
     provider_contract_hash: "provider123",
   };
   const preview = buildGithubActionPreview("pr_create", state);
@@ -1904,6 +2291,9 @@ test("GitHub apply refuses account, commit, approval, and relationship drift", (
       buildGithubActionPreview("merge", {
         ...state,
         relationship: "contribute",
+        capability_proof: githubCapability({
+          relationship: "contribute",
+        }),
         action_target: { pr_number: 7, method: "squash" },
       }),
     /managed/u,
@@ -1974,7 +2364,7 @@ test("managed PR update refuses a head repository from another fork", () => {
       title: "Improve workflow",
       body: "Updated body.",
     },
-    release_enabled: false,
+    capability_proof: githubCapability(),
     provider_contract_hash: "provider123",
   };
   const preview = buildGithubActionPreview("pr_update", state);
@@ -2056,7 +2446,10 @@ test("contribute PR apply and reconcile accept the confirmed account fork", () =
       draft: true,
       head_repository: "contributor/skill",
     },
-    release_enabled: false,
+    capability_proof: githubCapability({
+      account: "contributor",
+      relationship: "contribute",
+    }),
     provider_contract_hash: "provider123",
   };
   const preview = buildGithubActionPreview("pr_create", state);
@@ -2170,7 +2563,10 @@ test("PR create reconcile proves absence before a fresh confirmation", () => {
       draft: true,
       head_repository: "contributor/skill",
     },
-    release_enabled: false,
+    capability_proof: githubCapability({
+      account: "contributor",
+      relationship: "contribute",
+    }),
     provider_contract_hash: "provider123",
   };
   const preview = buildGithubActionPreview("pr_create", state);
@@ -2227,7 +2623,10 @@ test("PR create reconcile blocks metadata drift and recovers a REST identity mat
       draft: true,
       head_repository: "contributor/skill",
     },
-    release_enabled: false,
+    capability_proof: githubCapability({
+      account: "contributor",
+      relationship: "contribute",
+    }),
     provider_contract_hash: "provider123",
   };
   const preview = buildGithubActionPreview("pr_create", state);
@@ -2306,7 +2705,9 @@ test("merge and release reconcile return bound not-applied proofs", () => {
     head_branch: "feature",
     head_commit: headCommit,
     diff_hash: "diff123",
-    release_enabled: true,
+    capability_proof: githubCapability({
+      immutableReleases: true,
+    }),
     provider_contract_hash: "provider123",
   };
   const mergePreview = buildGithubActionPreview("merge", {
@@ -2407,7 +2808,9 @@ test("GitHub update, merge, and release apply only their approved action", () =>
     head_branch: "feature",
     head_commit: headCommit,
     diff_hash: "diff123",
-    release_enabled: true,
+    capability_proof: githubCapability({
+      immutableReleases: true,
+    }),
     provider_contract_hash: "provider123",
   };
   const inventory = {
@@ -2694,7 +3097,9 @@ test("release preview requires complete coverage bound to head commit", () => {
       prerelease: false,
       release_note_coverage: incompleteCoverage,
     },
-    release_enabled: true,
+    capability_proof: githubCapability({
+      immutableReleases: true,
+    }),
     provider_contract_hash: "provider123",
   };
   assert.throws(

@@ -6,7 +6,7 @@ Agent Skill Maintainer reviews what actually happened in a task—not just what 
 
 [繁體中文](README.zh-TW.md)
 
-> **Stable contract:** local analysis, isolated candidate implementation, Provider and release gates, separately confirmed GitHub personal Fork／branch／PR／merge／Release apply, and an exact-Release local update path for supported global `npx skills` installs are validated. Every remote write, local update, and cleanup remains a separately confirmed action.
+> **Stable contract:** local analysis, isolated candidate implementation, held-out evaluation and release gates, read-only GitHub capability proof, separately confirmed personal Fork／merge／Release actions, optional compound branch-push-plus-PR publication, bounded post-merge continuation, and an exact-Release local update path for supported global `npx skills` installs are validated.
 
 ## What can it do?
 
@@ -19,7 +19,7 @@ Point it at one Skill and give it evidence from the current task, a past experie
 - **Turn evidence into a minimal improvement** with a clear scope, expected closure, and regression case.
 - **Implement without touching the installed Skill** by working only in a separately confirmed, isolated clone.
 - **Review the complete candidate** for regressions, safety, documentation impact, measurable gain, and accidental process-file or private-data leakage.
-- **Prepare and control publication** with separate previews and confirmations for personal Fork creation, branch push, PR, merge, and Release actions. Maintainers push to the verified repository; contributors reuse a verified personal Fork or create it through its own confirmed action.
+- **Prepare and control publication** with a read-only capability proof and state-bound confirmations. Initial branch push and PR creation may stay granular or use one exact `publish_pr` confirmation; merge and Release remain separate. Maintainers push to the verified repository; contributors reuse a verified personal Fork or create it through its own confirmed action.
 - **Update a supported installed Skill after publication** through a separate preview and confirmation, exact Release commit materialization, atomic replacement, rollback, and read-only recovery. The current task keeps using the version it loaded at startup.
 
 It is designed for maintainers improving an existing Agent Skill. It is not a general code reviewer, a new-Skill generator, or an autonomous background scanner.
@@ -63,7 +63,7 @@ If the evidence does not justify a change, “no improvement needed” is a vali
 | Human decision | An explicit `accepted`, `rejected`, `deferred`, or `needs_evidence` decision for every proposal |
 | Candidate implementation | A separately approved isolated clone; the installed and currently executing Skill remain unchanged |
 | Validation | Complete Diff mapping plus safety, regression, documentation, measurable-gain, privacy, and repository-hygiene checks |
-| Publication | State-bound previews, Fork／branch／release／local-update proofs, and separate confirmations for every supported write |
+| Publication | Capability-bound previews, granular or compound branch／PR proofs, explicit stop dispositions, and separate merge／Release／local-update confirmations |
 
 ## Why not just edit the Skill?
 
@@ -80,7 +80,7 @@ human decision
         ↓
 isolated implementation → tests → complete Diff review
         ↓
-verified／confirmed Fork → confirmed branch push → PR → merge → release
+verified／confirmed Fork → confirmed (branch push → PR) → merge → release
         ↓
 separately confirmed exact-Release local update for a future task
 ```
@@ -127,9 +127,12 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs validate \
 
 State defaults to `~/.agent-skill-maintainer`. Use `--state-root` to select an isolated location. These commands do not execute Provider commands.
 
-GitHub writes use four ordered steps: create a state-bound preview, create an expiring approval only after explicit confirmation, consume it through the matching lifecycle transition, then apply it from that active run. Apply records a one-time attempt before re-checking the active account, permission, base and head commits, and Fork, branch, or PR. In `contribute` mode, verify an existing personal Fork first. If it is missing, create it with its own preview and confirmation. Then push the clean committed candidate branch with another confirmation before previewing PR creation:
+GitHub writes use four ordered steps: create a state-bound preview, create an expiring approval only after explicit confirmation, consume it through the matching lifecycle transition, then apply it from that active run. First generate the read-only capability proof; action state carries that proof rather than a caller-supplied Release flag. Apply records a one-time attempt before re-checking the active account, permission, base and head commits, and Fork, branch, or PR. In `contribute` mode, verify an existing personal Fork first. If it is missing, create it with its own preview and confirmation. Then use either granular branch／PR actions or the compound `publish_pr` path:
 
 ```bash
+node skills/agent-skill-maintainer/scripts/maintainer.mjs github-inspect \
+  --repository example/skill > github-capability.json
+
 # Existing-Fork path (`action_target.operation` is `reuse`):
 node skills/agent-skill-maintainer/scripts/maintainer.mjs github-fork-verify \
   --state fork-reuse-state.json > fork-proof.json
@@ -173,9 +176,23 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-reconcile \
   --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
   --preview github-preview.json --approval github-approval.json \
   > github-reconciliation.json
+
+# Optional exact compound path:
+node skills/agent-skill-maintainer/scripts/maintainer.mjs github-preview \
+  --action publish_pr --state publish-pr-state.json \
+  --candidate "$CANDIDATE" > publish-pr-preview.json
 ```
 
 The existing-Fork and missing-Fork paths are mutually exclusive: reuse state sets `action_target.operation` to `reuse`, while create state sets it to `create`. Do not feed a failed reuse state into creation without rebuilding and previewing the exact create action.
+
+`publish_pr` contains only the exact branch push and initial PR creation. A push-only result cannot replay the compound approval. Unobservable PR state remains `pending` and permits only read-only reconcile; a fresh granular `pr_create` preview is allowed only after that reconcile proves the PR absent and records `partial`. Merge, Release, and local update are never part of the compound confirmation. Completing after merge requires a `stop_after_merge` disposition and merge proof. A later Release request starts a bounded continuation:
+
+```bash
+node skills/agent-skill-maintainer/scripts/maintainer.mjs publication-continue \
+  --state-root "$STATE_ROOT" \
+  --source-run-id "$SOURCE_RUN_ID" --run-id "$RELEASE_RUN_ID" \
+  --binding-id "$BINDING_ID" --merge-proof merge-proof.json
+```
 
 After an official publication proof exists, a supported local update uses its own preview, approval, lifecycle transition, apply, and read-only reconcile:
 
@@ -205,11 +222,11 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 
 The first supported installation contract is a global `npx-skills` install whose canonical `.agents/skills/<skill>` directory is shared with Codex and／or Claude Code through the normal symlink layout. The standard global v3 Lock location, absolute `XDG_STATE_HOME`, and absolute `CLAUDE_CONFIG_DIR` are recognized. The binding, Lock, source repository, Skill subpath, canonical path fingerprint, installed tree, and Agent links must all agree. The update reads only the exact official Release commit, rejects source symlinks and submodules, atomically switches the canonical directory and lock entry, advances the Lock `ref` to that Release tag, and restores both on a failed postcondition. It never calls a generic “update latest” path. Project, copy, plugin, manual, and unknown installs are blocked instead of being converted to another method.
 
-Set both time variables to fresh ISO 8601 timestamps after confirmation; the expiry should be short-lived. Each transition-updates document must contain the current passed `validation_summary`, the exact `action_preview`, and its approval array; contributor branch push also includes the bound `fork_proof`. The lifecycle validates these documents before consuming the approval.
+Set both time variables to fresh ISO 8601 timestamps after confirmation; the expiry should be short-lived. Each transition-updates document must contain the current passed `validation_summary`, exact capability-bound `action_preview`, and its approval array; contributor branch or `publish_pr` actions also include the bound `fork_proof`. The lifecycle validates these documents before consuming the approval.
 
 `github-fork-verify` is read-only and reuses only `<active-account>/<upstream-name>` when it is writable, points to the bound upstream, and exposes the approved base commit. A missing Fork may be created with one `default_branch_only=true` request; asynchronous visibility or an uncertain response stays `pending`, and read-only reconciliation never repeats the request. The CLI tells the user to reconcile later. An explicit GitHub 4xx refusal is `blocked` with a redacted reason; a result still unresolved after five minutes is also `blocked`. Both require manual investigation rather than a blind retry.
 
-For `managed`, branch push targets the verified repository. For `contribute`, it requires the bound Fork proof. Push rejects the base branch, never changes candidate remotes, performs remote transport from a clean temporary bare repository without reading candidate-local Git configuration, disables local replacement refs and graft files during Git graph checks, and pushes the exact approved commit under an explicit expected-value lease so remote-prestate drift fails. Plain force, unspecified leases, non-fast-forward updates, and forced outcomes are prohibited. `github-apply` only accepts an approval already consumed by the active lifecycle transition, and the same approval cannot be replayed after an attempted write. If a remote write may have succeeded but its response was interrupted, `github-reconcile` checks the remote through read-only paths and records the action-specific recovery result. An unresolved or applied attempt cannot be retried. The CLI prints JSON to stdout, and the caller decides where local process state is stored. Never create the approval before the exact preview has been shown and confirmed.
+For `managed`, branch push targets the verified repository. For `contribute`, it requires the bound Fork proof. Push rejects the base branch, never changes candidate remotes, performs remote transport from a clean temporary bare repository without reading candidate-local Git configuration, disables local replacement refs and graft files during Git graph checks, and pushes the exact approved commit under an explicit expected-value lease so remote-prestate drift fails. Plain force, unspecified leases, non-fast-forward updates, and forced outcomes are prohibited. `github-apply` only accepts an approval already consumed by the active lifecycle transition, and the same approval cannot be replayed after an attempted write. If a remote write may have succeeded but its response was interrupted, `github-reconcile` checks the remote through read-only paths and records the action-specific recovery result. A compound `pending` result permits only reconcile; a compound `partial` result proves PR absence and may fall back only to granular PR creation. An unresolved or applied attempt cannot be retried. The CLI prints JSON to stdout, and the caller decides where local process state is stored. Never create the approval before the exact preview has been shown and confirmed.
 
 </details>
 
@@ -246,7 +263,7 @@ Intentionally unsupported in this version:
 - Candidate analysis and implementation keep the installed and currently executing Skill read-only. Only a separately confirmed post-release local-update action may replace a supported installed copy, and it affects future tasks rather than hot-swapping the current task.
 - Conversations, Issues, files, hooks, scripts, workflows, and Skill instructions are treated as untrusted evidence.
 - Implementation requires an isolated checkout and a dedicated approval.
-- Personal Fork creation, branch push, PR creation, PR update, merge, release, local update, and cleanup require separate confirmations. Read-only verification and reuse of an existing valid Fork does not.
+- Personal Fork creation, PR update, merge, release, local update, and cleanup require separate confirmations. Initial branch push plus PR creation may use `publish_pr` or remain granular. Read-only capability inspection and reuse of an existing valid Fork do not require a write confirmation.
 - A merged PR is not treated as a release.
 - Raw conversations, plans, evaluations, temporary state, secrets, personal data, private source code, and other local process files do not belong in the public repository. Optimization commits stay focused on the approved change, directly related tests, and required durable contracts or guidance.
 

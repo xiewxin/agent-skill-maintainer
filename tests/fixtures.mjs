@@ -12,6 +12,27 @@ import {
   fingerprintTree,
   runGit as runSafeGit,
 } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
+import {
+  buildGithubCapabilityProof,
+} from "../skills/agent-skill-maintainer/scripts/lib/github.mjs";
+
+/** Returns one deterministic read-only GitHub capability proof. */
+export function githubCapability({
+  account = "example-user",
+  repository = "example/skill",
+  relationship = "managed",
+  defaultBranch = "main",
+  immutableReleases = false,
+} = {}) {
+  return buildGithubCapabilityProof({
+    account,
+    repository,
+    permission: relationship === "managed" ? "ADMIN" : "READ",
+    defaultBranch,
+    immutableReleases,
+    inspectedAt: "2026-07-28T08:00:00.000Z",
+  });
+}
 
 /** Runs Git in a test repository and returns trimmed stdout. */
 export function runGit(repository, ...arguments_) {

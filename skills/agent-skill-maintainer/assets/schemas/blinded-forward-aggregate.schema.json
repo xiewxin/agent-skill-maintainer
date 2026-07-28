@@ -11,12 +11,14 @@
     "fixture",
     "candidate_skill_fingerprint",
     "raw_outputs_published",
+    "protocol",
     "forward_evaluation",
+    "cost",
     "platform_validation",
     "limits"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
     "evidence_kind": {
       "type": "string",
       "const": "blinded-forward-aggregate"
@@ -28,6 +30,44 @@
       "pattern": "[a-f0-9]{64}"
     },
     "raw_outputs_published": {"type": "boolean", "const": false},
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fixture_status",
+        "held_out_from_iteration",
+        "rubric_locked_before_outputs",
+        "locked_at",
+        "baseline_started_at",
+        "candidate_started_at",
+        "isolated_sessions",
+        "candidate_feedback_before_verdict",
+        "model_id",
+        "prompt_sha256",
+        "artifacts_sha256",
+        "rubric_sha256",
+        "tool_profile_sha256",
+        "baseline_session_sha256",
+        "candidate_session_sha256"
+      ],
+      "properties": {
+        "fixture_status": {"type": "string", "const": "held-out"},
+        "held_out_from_iteration": {"type": "boolean", "const": true},
+        "rubric_locked_before_outputs": {"type": "boolean", "const": true},
+        "locked_at": {"type": "string", "format": "date-time"},
+        "baseline_started_at": {"type": "string", "format": "date-time"},
+        "candidate_started_at": {"type": "string", "format": "date-time"},
+        "isolated_sessions": {"type": "boolean", "const": true},
+        "candidate_feedback_before_verdict": {"type": "boolean", "const": false},
+        "model_id": {"type": "string", "minLength": 1},
+        "prompt_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "artifacts_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "rubric_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "tool_profile_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "baseline_session_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "candidate_session_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    },
     "forward_evaluation": {
       "type": "object",
       "additionalProperties": false,
@@ -61,6 +101,28 @@
         "candidate_passed_behaviors": {"type": "integer"},
         "candidate_regressions": {"type": "integer"},
         "false_positive_optimizations": {"type": "integer"},
+        "passed": {"type": "boolean"}
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_artifact_bytes",
+        "candidate_artifact_bytes",
+        "artifact_byte_ratio",
+        "baseline_tool_calls",
+        "candidate_tool_calls",
+        "candidate_heading_count",
+        "passed"
+      ],
+      "properties": {
+        "baseline_artifact_bytes": {"type": "integer"},
+        "candidate_artifact_bytes": {"type": "integer"},
+        "artifact_byte_ratio": {"type": "number"},
+        "baseline_tool_calls": {"type": "integer"},
+        "candidate_tool_calls": {"type": "integer"},
+        "candidate_heading_count": {"type": "integer"},
         "passed": {"type": "boolean"}
       }
     },

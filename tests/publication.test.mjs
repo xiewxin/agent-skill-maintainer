@@ -22,6 +22,7 @@ import {
   validateForkForwardFixture,
   validateForwardEvaluationAggregate,
   validateForwardEvaluationFixture,
+  validateHeldoutForwardFixture,
   validateLocalUpdateForwardAggregate,
   validateLocalUpdateForwardFixture,
 } from "../evals/run-evals.mjs";
@@ -41,6 +42,7 @@ import {
 import {
   branchPushGithubRunner,
   createBranchPushFixture,
+  githubCapability,
   initializeRepository,
   localRemoteGitRunner,
   runGit,
@@ -203,7 +205,11 @@ function prepareCliBranchPushAction(
       head_repository: headRepository,
       operation: "create",
     },
-    release_enabled: false,
+    capability_proof: githubCapability({
+      account,
+      relationship: fixture.binding.relationship,
+      defaultBranch: repository.base_ref,
+    }),
     provider_contract_hash: fingerprint(loadProviderProfiles()),
   };
   writeFileSync(
@@ -306,7 +312,11 @@ function prepareCliForkAction(fixture) {
       default_branch_only: true,
       operation: "create",
     },
-    release_enabled: false,
+    capability_proof: githubCapability({
+      account: "contributor",
+      relationship: "contribute",
+      defaultBranch: repository.base_ref,
+    }),
     provider_contract_hash: fingerprint(loadProviderProfiles()),
   };
   writeFileSync(statePath, `${JSON.stringify(state)}\n`, "utf8");
@@ -784,7 +794,7 @@ test("CLI creates state-bound GitHub previews and expiring approvals", () => {
           draft: true,
           head_repository: "example/skill",
         },
-        release_enabled: false,
+        capability_proof: githubCapability(),
         provider_contract_hash: "c".repeat(64),
       })}\n`,
       "utf8",
@@ -848,7 +858,7 @@ test("CLI creates state-bound GitHub previews and expiring approvals", () => {
           head_repository: "example/skill",
           operation: "create",
         },
-        release_enabled: false,
+        capability_proof: githubCapability(),
         provider_contract_hash: "c".repeat(64),
       })}\n`,
       "utf8",
@@ -887,6 +897,55 @@ test("CLI creates state-bound GitHub previews and expiring approvals", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("CLI GitHub inspection returns a live capability proof", () => {
+  const proof = runMaintainerCommand(
+    [
+      "github-inspect",
+      "--repository",
+      "example/skill",
+      "--inspected-at",
+      "2026-07-28T08:00:00.000Z",
+    ],
+    {
+      githubRunner: (arguments_) => {
+        if (arguments_[0] === "api" && arguments_[1] === "user") {
+          return {
+            status: 0,
+            stdout: "example-user\n",
+            stderr: "",
+          };
+        }
+        if (arguments_[0] === "repo") {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              nameWithOwner: "example/skill",
+              viewerPermission: "ADMIN",
+              defaultBranchRef: { name: "main" },
+            }),
+            stderr: "",
+          };
+        }
+        if (
+          arguments_[0] === "api" &&
+          arguments_[1] ===
+            "repos/example/skill/immutable-releases"
+        ) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ enabled: true }),
+            stderr: "",
+          };
+        }
+        throw new Error(`unexpected call: ${arguments_.join(" ")}`);
+      },
+    },
+  );
+  assert.equal(proof.relationship, "managed");
+  assert.equal(proof.release_enabled, true);
+  assert.equal(proof.fingerprint.length, 64);
 });
 
 test("CLI branch push completes approval apply and reconcile", () => {
@@ -1641,6 +1700,26 @@ test("forward fixture keeps positive discovery and negative non-trigger contract
         ...fixture.positive_expectations,
         minimum_defect_findings: 1,
       },
+    }),
+    false,
+  );
+});
+
+test("held-out fixture locks publication continuation A/B before outputs", () => {
+  const fixture = JSON.parse(
+    read("evals/cases/release-continuation-heldout.json"),
+  );
+  assert.equal(validateHeldoutForwardFixture(fixture), true);
+  assert.equal(
+    fixture.id,
+    "synthetic/deployment-continuation-heldout",
+  );
+  assert.equal(fixture.required_behaviors.length, 8);
+  assert.equal(fixture.raw_outputs_published, false);
+  assert.equal(
+    validateHeldoutForwardFixture({
+      ...fixture,
+      locked_at: "not-a-time",
     }),
     false,
   );

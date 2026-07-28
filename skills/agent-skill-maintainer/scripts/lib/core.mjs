@@ -44,8 +44,10 @@ export const SCHEMA_NAMES = Object.freeze([
   "local-update-reconciliation",
   "local-update-forward-aggregate",
   "documentation-impact",
+  "github-capability-proof",
   "github-action-approval",
   "github-action-reconciliation",
+  "publish-pr-proof",
   "blinded-forward-aggregate",
 ]);
 

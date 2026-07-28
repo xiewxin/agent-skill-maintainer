@@ -4,11 +4,13 @@
  */
 
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import {
   FORMAL_PROVIDER_IDS,
   LEGACY_PROVIDER_IDS,
+  fingerprint,
   publicationGate,
   loadProviderProfiles,
   stableReleaseGate,
@@ -31,6 +33,16 @@ const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
   "stable-feedback-and-optimization-ids",
   "structure-finding-evidence-bound",
   "target-intent-preserved",
+]);
+const REQUIRED_HELDOUT_BEHAVIOR_IDS = Object.freeze([
+  "analysis-only-boundary",
+  "artifact-copy-remains-evidence-gated",
+  "capability-provenance-defect",
+  "intent-map-preserves-separate-deployment-boundary",
+  "only-preintegration-actions-combine",
+  "proposals-remain-unaccepted",
+  "stable-feedback-and-optimization-ids",
+  "terminal-completion-defect",
 ]);
 const REQUIRED_FORK_BEHAVIOR_IDS = Object.freeze([
   "confirmed-create-exactly-one-post",
@@ -84,6 +96,74 @@ export function validateForwardEvaluationFixture(fixture) {
     negative?.files_modified === false &&
     fixture?.raw_outputs_published === false
   );
+}
+
+/** Validates the locked held-out fixture used by publishable same-model A/B. */
+export function validateHeldoutForwardFixture(fixture) {
+  const behaviorIds = [...(fixture?.required_behaviors ?? [])].sort();
+  const rubricBehaviorIds = [
+    ...(fixture?.locked_rubric?.required_behaviors ?? []),
+  ]
+    .map((behavior) => behavior.id)
+    .sort();
+  const targetFiles = fixture?.target_files;
+  const quality = fixture?.quality_thresholds;
+  const cost = fixture?.cost_thresholds;
+  return (
+    fixture?.schema_version === 1 &&
+    fixture?.id === "synthetic/deployment-continuation-heldout" &&
+    Number.isFinite(Date.parse(fixture?.locked_at)) &&
+    targetFiles !== null &&
+    typeof targetFiles === "object" &&
+    !Array.isArray(targetFiles) &&
+    Object.keys(targetFiles).length === 3 &&
+    Object.values(targetFiles).every(
+      (content) => typeof content === "string" && content.length > 0,
+    ) &&
+    typeof fixture?.prompt === "string" &&
+    fixture.prompt.includes("`deployment-conductor`") &&
+    Array.isArray(fixture?.usage_evidence) &&
+    fixture.usage_evidence.length === 4 &&
+    JSON.stringify(behaviorIds) ===
+      JSON.stringify(REQUIRED_HELDOUT_BEHAVIOR_IDS) &&
+    fixture?.locked_rubric?.schema_version === 1 &&
+    fixture?.locked_rubric?.fixture_id === fixture.id &&
+    fixture?.locked_rubric?.locked_before_outputs === true &&
+    JSON.stringify(rubricBehaviorIds) ===
+      JSON.stringify(REQUIRED_HELDOUT_BEHAVIOR_IDS) &&
+    JSON.stringify(fixture.locked_rubric.quality_thresholds) ===
+      JSON.stringify(quality) &&
+    JSON.stringify(fixture.locked_rubric.cost_thresholds) ===
+      JSON.stringify(cost) &&
+    quality?.candidate_required_behaviors === 8 &&
+    quality?.candidate_regressions === 0 &&
+    quality?.false_positive_optimizations === 0 &&
+    quality?.candidate_minimum_gain_over_baseline === 1 &&
+    quality?.max_candidate_heading_count === 8 &&
+    cost?.candidate_artifact_bytes_max_ratio_to_baseline === 1.5 &&
+    cost?.candidate_tool_calls_max === 6 &&
+    fixture?.tool_profile?.mode === "read-only" &&
+    fixture?.tool_profile?.filesystem_write === false &&
+    fixture?.tool_profile?.remote_write === false &&
+    fixture?.raw_outputs_published === false
+  );
+}
+
+/** Returns the four fingerprints locked before either held-out output. */
+function heldoutProtocolFingerprints(fixture) {
+  const sha256 = (value) =>
+    createHash("sha256").update(value, "utf8").digest("hex");
+  return {
+    prompt_sha256: sha256(fixture.prompt),
+    artifacts_sha256: fingerprint({
+      target_files: fixture.target_files,
+      usage_evidence: fixture.usage_evidence,
+    }),
+    rubric_sha256: sha256(
+      `${JSON.stringify(fixture.locked_rubric, null, 2)}\n`,
+    ),
+    tool_profile_sha256: fingerprint(fixture.tool_profile),
+  };
 }
 
 /** Validates the stable synthetic personal-Fork forward fixture. */
@@ -258,11 +338,27 @@ export function validateForkForwardAggregate(
 /** Validates one publishable blinded forward-evaluation aggregate. */
 export function validateForwardEvaluationAggregate(
   aggregate,
-  { currentSkillFingerprint },
+  {
+    currentSkillFingerprint,
+    fixture = JSON.parse(
+      readFileSync(
+        resolve(
+          ROOT,
+          "evals",
+          "cases",
+          "release-continuation-heldout.json",
+        ),
+        "utf8",
+      ),
+    ),
+  },
 ) {
   validateDocument("blinded-forward-aggregate", aggregate);
   const behaviors = aggregate?.forward_evaluation?.required_behaviors ?? [];
   const platforms = aggregate?.platform_validation?.platforms ?? [];
+  const protocol = aggregate?.protocol ?? {};
+  const cost = aggregate?.cost ?? {};
+  const lockedFingerprints = heldoutProtocolFingerprints(fixture);
   const behaviorIds = behaviors
     .map((behavior) => behavior.id)
     .sort();
@@ -276,17 +372,65 @@ export function validateForwardEvaluationAggregate(
     (behavior) =>
       behavior.baseline === true && behavior.candidate !== true,
   ).length;
+  const lockedAt = Date.parse(protocol.locked_at);
+  const baselineStartedAt = Date.parse(protocol.baseline_started_at);
+  const candidateStartedAt = Date.parse(protocol.candidate_started_at);
+  const expectedByteRatio =
+    cost.baseline_artifact_bytes > 0
+      ? cost.candidate_artifact_bytes / cost.baseline_artifact_bytes
+      : Number.NaN;
+  const protocolPassed =
+    validateHeldoutForwardFixture(fixture) &&
+    protocol.fixture_status === "held-out" &&
+    protocol.held_out_from_iteration === true &&
+    protocol.rubric_locked_before_outputs === true &&
+    protocol.isolated_sessions === true &&
+    protocol.candidate_feedback_before_verdict === false &&
+    typeof protocol.model_id === "string" &&
+    protocol.model_id.length > 0 &&
+    Number.isFinite(lockedAt) &&
+    Number.isFinite(baselineStartedAt) &&
+    Number.isFinite(candidateStartedAt) &&
+    lockedAt <= baselineStartedAt &&
+    lockedAt <= candidateStartedAt &&
+    protocol.baseline_session_sha256 !==
+      protocol.candidate_session_sha256 &&
+    Object.entries(lockedFingerprints).every(
+      ([name, value]) => protocol[name] === value,
+    );
+  const costPassed =
+    Number.isInteger(cost.baseline_artifact_bytes) &&
+    cost.baseline_artifact_bytes > 0 &&
+    Number.isInteger(cost.candidate_artifact_bytes) &&
+    cost.candidate_artifact_bytes > 0 &&
+    typeof cost.artifact_byte_ratio === "number" &&
+    Math.abs(cost.artifact_byte_ratio - expectedByteRatio) < 1e-9 &&
+    cost.artifact_byte_ratio <=
+      fixture.cost_thresholds.candidate_artifact_bytes_max_ratio_to_baseline &&
+    Number.isInteger(cost.baseline_tool_calls) &&
+    cost.baseline_tool_calls >= 0 &&
+    Number.isInteger(cost.candidate_tool_calls) &&
+    cost.candidate_tool_calls >= 0 &&
+    cost.candidate_tool_calls <=
+      fixture.cost_thresholds.candidate_tool_calls_max &&
+    Number.isInteger(cost.candidate_heading_count) &&
+    cost.candidate_heading_count >= 0 &&
+    cost.candidate_heading_count <=
+      fixture.quality_thresholds.max_candidate_heading_count &&
+    cost.passed === true;
   const forwardPassed =
-    aggregate.schema_version === 1 &&
+    aggregate.schema_version === 2 &&
     aggregate.evidence_kind === "blinded-forward-aggregate" &&
     Number.isFinite(Date.parse(aggregate.evaluated_at)) &&
-    aggregate.fixture === "synthetic/sample-cleanup" &&
+    aggregate.fixture === fixture.id &&
     aggregate.candidate_skill_fingerprint === currentSkillFingerprint &&
     aggregate.raw_outputs_published === false &&
+    protocolPassed &&
+    costPassed &&
     aggregate.forward_evaluation?.same_model_and_tools === true &&
     aggregate.forward_evaluation?.expected_findings_hidden === true &&
     JSON.stringify(behaviorIds) ===
-      JSON.stringify(REQUIRED_FORWARD_BEHAVIOR_IDS) &&
+      JSON.stringify(REQUIRED_HELDOUT_BEHAVIOR_IDS) &&
     behaviors.every(
       (behavior) =>
         typeof behavior.id === "string" &&
@@ -300,6 +444,8 @@ export function validateForwardEvaluationAggregate(
     aggregate.forward_evaluation?.candidate_regressions ===
       candidateRegressions &&
     candidateRegressions === 0 &&
+    candidatePassed - baselinePassed >=
+      fixture.quality_thresholds.candidate_minimum_gain_over_baseline &&
     aggregate.forward_evaluation?.false_positive_optimizations === 0 &&
     aggregate.forward_evaluation?.passed === true;
   const platformPassed =
@@ -330,6 +476,8 @@ export function validateForwardEvaluationAggregate(
       candidate_regressions: candidateRegressions,
       false_positive_optimizations:
         aggregate.forward_evaluation?.false_positive_optimizations,
+      protocol_passed: protocolPassed,
+      cost_passed: costPassed,
     },
     platform: {
       passed: platformPassed,
@@ -462,6 +610,19 @@ export function main(argv = process.argv.slice(2)) {
   );
   const forwardFixtureContractPassed =
     validateForwardEvaluationFixture(forwardFixture);
+  const heldoutForwardFixture = JSON.parse(
+    readFileSync(
+      resolve(
+        ROOT,
+        "evals",
+        "cases",
+        "release-continuation-heldout.json",
+      ),
+      "utf8",
+    ),
+  );
+  const heldoutForwardFixtureContractPassed =
+    validateHeldoutForwardFixture(heldoutForwardFixture);
   const forkForwardFixture = JSON.parse(
     readFileSync(
       resolve(
@@ -592,6 +753,9 @@ export function main(argv = process.argv.slice(2)) {
   if (!forwardFixtureContractPassed) {
     releaseBlockers.push("forward_fixture_contract_pending");
   }
+  if (!heldoutForwardFixtureContractPassed) {
+    releaseBlockers.push("heldout_forward_fixture_contract_pending");
+  }
   if (!forwardAggregate.forward.passed) {
     releaseBlockers.push("agent_forward_evaluation_pending");
   }
@@ -624,6 +788,7 @@ export function main(argv = process.argv.slice(2)) {
     triggerContractPassed &&
     realUsageContractPassed &&
     forwardFixtureContractPassed &&
+    heldoutForwardFixtureContractPassed &&
     forkForwardFixtureContractPassed &&
     localUpdateForwardFixtureContractPassed &&
     gate.allowed &&
@@ -641,6 +806,8 @@ export function main(argv = process.argv.slice(2)) {
     redacted_real_usage_cases: 1,
     real_usage_contract_passed: realUsageContractPassed,
     forward_fixture_contract_passed: forwardFixtureContractPassed,
+    heldout_forward_fixture_contract_passed:
+      heldoutForwardFixtureContractPassed,
     fork_forward_fixture_contract_passed:
       forkForwardFixtureContractPassed,
     local_update_forward_fixture_contract_passed:

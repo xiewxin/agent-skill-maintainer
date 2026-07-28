@@ -18,6 +18,7 @@ import {
   applyGithubAction,
   buildGithubActionApproval,
   buildGithubActionPreview,
+  inspectGithubRepositoryCapabilities,
   inspectGithubActionState,
   reconcileGithubAction,
   verifyExistingFork,
@@ -35,6 +36,7 @@ import {
   authorizeLocalUpdateApply,
   authorizeLocalUpdateReconcile,
   authorizeGithubActionReconcile,
+  createPublicationContinuation,
   createRun,
   readRun,
   recordLocalUpdateOutcome,
@@ -55,7 +57,9 @@ function parseArguments(argv) {
       "start",
       "status",
       "transition",
+      "publication-continue",
       "validate",
+      "github-inspect",
       "github-preview",
       "github-fork-verify",
       "github-approve",
@@ -111,7 +115,15 @@ function parseArguments(argv) {
       "phase",
       "updates",
     ]),
+    "publication-continue": new Set([
+      "state-root",
+      "source-run-id",
+      "run-id",
+      "binding-id",
+      "merge-proof",
+    ]),
     validate: new Set(["schema", "input"]),
+    "github-inspect": new Set(["repository", "inspected-at"]),
     "github-preview": new Set(["action", "state", "candidate"]),
     "github-fork-verify": new Set(["state"]),
     "github-approve": new Set([
@@ -240,6 +252,20 @@ function execute(
       { updates },
     );
   }
+  if (command === "publication-continue") {
+    return createPublicationContinuation(
+      values["state-root"] ?? DEFAULT_STATE_ROOT,
+      {
+        sourceRunId: required(values, "source-run-id"),
+        runId: required(values, "run-id"),
+        bindingId: required(values, "binding-id"),
+        mergeProof: readJsonFile(
+          required(values, "merge-proof"),
+          "Merge proof",
+        ),
+      },
+    );
+  }
   if (command === "validate") {
     const schema = required(values, "schema");
     if (!SCHEMA_NAMES.includes(schema)) {
@@ -249,13 +275,25 @@ function execute(
     validateDocument(schema, document);
     return { schema, valid: true };
   }
+  if (command === "github-inspect") {
+    return inspectGithubRepositoryCapabilities(
+      required(values, "repository"),
+      {
+        runner: githubRunner,
+        now:
+          values["inspected-at"] === undefined
+            ? new Date()
+            : new Date(values["inspected-at"]),
+      },
+    );
+  }
   if (command === "github-preview") {
     const action = required(values, "action");
     const state = readJsonFile(
       required(values, "state"),
       "GitHub action state",
     );
-    if (action === "branch_push") {
+    if (["branch_push", "publish_pr"].includes(action)) {
       const candidate = required(values, "candidate");
       const pathFingerprint = fingerprintCandidatePath(candidate);
       const supplied =
@@ -275,7 +313,7 @@ function execute(
       state.action_target.candidate_path_fingerprint =
         pathFingerprint;
     } else if (values.candidate !== undefined) {
-      throw new Error("--candidate 只適用於 branch_push");
+      throw new Error("--candidate 只適用於 branch_push 或 publish_pr");
     }
     return buildGithubActionPreview(
       action,
@@ -312,7 +350,7 @@ function execute(
     const stateRoot = values["state-root"] ?? DEFAULT_STATE_ROOT;
     const runId = required(values, "run-id");
     let candidatePath;
-    if (preview.action === "branch_push") {
+    if (["branch_push", "publish_pr"].includes(preview.action)) {
       candidatePath = required(values, "candidate");
       const active = readRun(stateRoot, runId);
       validateBranchPushLocalState(
@@ -321,7 +359,7 @@ function execute(
         active.candidate_snapshot,
       );
     } else if (values.candidate !== undefined) {
-      throw new Error("--candidate 只適用於 branch_push");
+      throw new Error("--candidate 只適用於 branch_push 或 publish_pr");
     }
     if (preview.action === "fork_create") {
       inspectGithubActionState(preview, {
