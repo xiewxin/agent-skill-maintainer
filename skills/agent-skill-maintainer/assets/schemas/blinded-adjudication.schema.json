@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/blinded-adjudication.schema.json",
+  "title": "Blinded Evaluation Adjudication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_kind",
+    "fixture",
+    "rubric_sha256",
+    "assignment",
+    "sessions",
+    "judging",
+    "behaviors",
+    "quality",
+    "derivation",
+    "raw_outputs_published",
+    "synthetic_fixture"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "evidence_kind": {"type": "string", "const": "blinded-adjudication"},
+    "fixture": {"type": "string", "minLength": 1},
+    "rubric_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "committed_at",
+        "seed_commitment_sha256",
+        "baseline_label",
+        "candidate_label"
+      ],
+      "properties": {
+        "method": {"type": "string", "const": "randomized-a-b"},
+        "committed_at": {"type": "string", "format": "date-time"},
+        "seed_commitment_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "baseline_label": {"type": "string", "enum": ["a", "b"]},
+        "candidate_label": {"type": "string", "enum": ["a", "b"]}
+      }
+    },
+    "sessions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label_a", "label_b", "judge"],
+      "properties": {
+        "label_a": {"$ref": "#/$defs/generator_session"},
+        "label_b": {"$ref": "#/$defs/generator_session"},
+        "judge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model_id",
+            "session_sha256",
+            "started_at",
+            "completed_at",
+            "output_sha256"
+          ],
+          "properties": {
+            "model_id": {"type": "string", "minLength": 1},
+            "session_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+            "started_at": {"type": "string", "format": "date-time"},
+            "completed_at": {"type": "string", "format": "date-time"},
+            "output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+          }
+        }
+      }
+    },
+    "judging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started_at",
+        "completed_at",
+        "unblinded_at",
+        "expected_findings_hidden",
+        "labels_hidden_from_judge"
+      ],
+      "properties": {
+        "started_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"type": "string", "format": "date-time"},
+        "unblinded_at": {"type": "string", "format": "date-time"},
+        "expected_findings_hidden": {"type": "boolean", "const": true},
+        "labels_hidden_from_judge": {"type": "boolean", "const": true}
+      }
+    },
+    "behaviors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label_a", "label_b"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "label_a": {"$ref": "#/$defs/verdict"},
+          "label_b": {"$ref": "#/$defs/verdict"}
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "false_positive_optimizations",
+        "rationale_summary",
+        "evidence_sha256"
+      ],
+      "properties": {
+        "false_positive_optimizations": {"type": "integer", "minimum": 0},
+        "rationale_summary": {"type": "string", "minLength": 1},
+        "evidence_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    },
+    "derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "builder",
+        "assignment_rule",
+        "evidence_hash_rule",
+        "session_hash_rule"
+      ],
+      "properties": {
+        "builder": {
+          "type": "string",
+          "const": "agent-skill-maintainer/blinded-adjudication-v1"
+        },
+        "assignment_rule": {
+          "type": "string",
+          "const": "seed-first-byte-parity"
+        },
+        "evidence_hash_rule": {
+          "type": "string",
+          "const": "canonical-json-redacted-evidence-summary"
+        },
+        "session_hash_rule": {
+          "type": "string",
+          "const": "canonical-json-private-session-metadata"
+        }
+      }
+    },
+    "raw_outputs_published": {"type": "boolean", "const": false},
+    "synthetic_fixture": {"type": "boolean", "const": true}
+  },
+  "$defs": {
+    "generator_session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "session_sha256",
+        "tool_profile_sha256",
+        "started_at",
+        "completed_at",
+        "output_sha256"
+      ],
+      "properties": {
+        "model_id": {"type": "string", "minLength": 1},
+        "session_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "tool_profile_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"type": "string", "format": "date-time"},
+        "output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "rationale_summary", "evidence_sha256"],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["pass", "fail", "insufficient_evidence"]
+        },
+        "rationale_summary": {"type": "string", "minLength": 1},
+        "evidence_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    }
+  }
+}

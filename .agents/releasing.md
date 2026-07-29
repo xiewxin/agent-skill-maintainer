@@ -2,7 +2,7 @@
 
 1. Start from the latest protected default branch and create a scoped branch.
 2. Validate the complete candidate Diff, public-file allowlist, schemas, Provider claims, and process-artifact exclusions.
-3. Run the full Node tests, publication validator, evaluation suite, platform matrix, required forward scenarios, and the five-Provider stable aggregate gate.
+3. Run the full Node tests, publication validator, evaluation suite, platform matrix, required forward scenarios, the traceable blinded adjudication／measurement gate, and the five-Provider stable aggregate gate.
 4. Build a change inventory from the previous official tag through the candidate commit.
 5. Map every in-range commit, detected Pull Request, and accepted `OPT-*` to a release-note entry or an explicit exclusion reason.
 6. For contributor mode, verify and reuse the active account's personal Fork read-only or create it only after a separate preview and confirmation; require the resulting Fork proof.
@@ -12,6 +12,7 @@
 10. If stopping after merge, record `stop_after_merge` with the exact merge proof. A later continuation must bind that terminal state and proof. A migrated `legacy_completed` run may recover only when its complete candidate, validation and PR evidence plus a detached merge proof match a fresh read-only GitHub observation; every mismatch stops before a new run or lease. Preview version, tag, target commit, title, complete notes, and release settings before a separately confirmed release.
 11. Verify that the official tag and GitHub Release contain the approved main commit.
 12. Only then inspect the recorded installation method. For a proven global `npx-skills` symlink installation, preview and confirm an update pinned to the exact Release commit, reserve the action once, atomically replace Skill and lock, and verify the update proof. Reconcile read-only after interruption. Unsupported methods remain blocked, and the current task keeps using its loaded version.
+13. Candidate cleanup is optional and remains a later independent action. Preview the exact eligible checkout from an immutable terminal source run, obtain a new confirmation, then use only the cleanup transaction's attempt, quarantine, proof, and reconciliation path.
 
 `stable_candidate_ready` is the pre-release decision and must not depend on an already existing Release. `publication_verified` is post-release evidence and must remain false until the exact official tag and Release are read back.
 

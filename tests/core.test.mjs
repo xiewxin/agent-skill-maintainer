@@ -42,7 +42,7 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
 
 test("all public schemas parse and lock an explicit version", () => {
-  assert.equal(SCHEMA_NAMES.length, 30);
+  assert.equal(SCHEMA_NAMES.length, 37);
   for (const schema of SCHEMA_NAMES) {
     const document = JSON.parse(
       readFileSync(

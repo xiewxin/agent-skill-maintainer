@@ -22,6 +22,15 @@ import {
   validateProviderValidationAggregate,
 } from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
 import { fingerprintTree } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
+import {
+  buildBlindedAdjudication,
+  buildBlindedMeasurement,
+  deriveBlindedForwardAggregate,
+  inspectBlindedForwardAggregate,
+  validateBlindedAdjudication,
+  validateBlindedMeasurement,
+  verifyBlindedMeasurementSources,
+} from "../skills/agent-skill-maintainer/scripts/lib/evaluation.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
@@ -35,14 +44,14 @@ const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
   "target-intent-preserved",
 ]);
 const REQUIRED_HELDOUT_BEHAVIOR_IDS = Object.freeze([
-  "exact-artifact-identity-required",
-  "fresh-github-merged-proof-required",
-  "future-task-controller-boundary",
-  "legacy-only-recovery",
-  "ordinary-terminal-remains-blocked",
-  "recovered-continuation-records-provenance",
-  "remote-actions-remain-separate",
-  "source-run-remains-read-only",
+  "active-aborted-and-ambiguous-resources-block",
+  "candidate-does-not-self-approve",
+  "cleanup-attempt-precedes-quarantine-delete",
+  "cleanup-exact-candidate-only",
+  "cleanup-reconcile-does-not-replay",
+  "independent-pre-unblind-judge-required",
+  "measurement-and-aggregate-are-derived",
+  "terminal-source-run-remains-byte-stable",
 ]);
 const REQUIRED_FORK_BEHAVIOR_IDS = Object.freeze([
   "confirmed-create-exactly-one-post",
@@ -111,7 +120,7 @@ export function validateHeldoutForwardFixture(fixture) {
   const cost = fixture?.cost_thresholds;
   return (
     fixture?.schema_version === 1 &&
-    fixture?.id === "synthetic/archive-release-resumption-heldout" &&
+    fixture?.id === "synthetic/candidate-cleanup-scoring-heldout" &&
     Number.isFinite(Date.parse(fixture?.locked_at)) &&
     targetFiles !== null &&
     typeof targetFiles === "object" &&
@@ -121,7 +130,7 @@ export function validateHeldoutForwardFixture(fixture) {
       (content) => typeof content === "string" && content.length > 0,
     ) &&
     typeof fixture?.prompt === "string" &&
-    fixture.prompt.includes("`artifact-publisher`") &&
+    fixture.prompt.includes("`candidate-lifecycle`") &&
     Array.isArray(fixture?.usage_evidence) &&
     fixture.usage_evidence.length === 4 &&
     JSON.stringify(behaviorIds) ===
@@ -346,7 +355,29 @@ export function validateForwardEvaluationAggregate(
           ROOT,
           "evals",
           "cases",
-          "archive-release-resumption-heldout.json",
+          "candidate-cleanup-scoring-heldout.json",
+        ),
+        "utf8",
+      ),
+    ),
+    adjudication = JSON.parse(
+      readFileSync(
+        resolve(
+          ROOT,
+          "evals",
+          "evidence",
+          "blinded-adjudication-v1.0.0.json",
+        ),
+        "utf8",
+      ),
+    ),
+    measurement = JSON.parse(
+      readFileSync(
+        resolve(
+          ROOT,
+          "evals",
+          "evidence",
+          "blinded-measurement-v1.0.0.json",
         ),
         "utf8",
       ),
@@ -354,142 +385,83 @@ export function validateForwardEvaluationAggregate(
   },
 ) {
   validateDocument("blinded-forward-aggregate", aggregate);
-  const behaviors = aggregate?.forward_evaluation?.required_behaviors ?? [];
-  const platforms = aggregate?.platform_validation?.platforms ?? [];
-  const protocol = aggregate?.protocol ?? {};
-  const cost = aggregate?.cost ?? {};
-  const lockedFingerprints = heldoutProtocolFingerprints(fixture);
-  const behaviorIds = behaviors
-    .map((behavior) => behavior.id)
-    .sort();
-  const baselinePassed = behaviors.filter(
-    (behavior) => behavior.baseline === true,
-  ).length;
-  const candidatePassed = behaviors.filter(
-    (behavior) => behavior.candidate === true,
-  ).length;
-  const candidateRegressions = behaviors.filter(
-    (behavior) =>
-      behavior.baseline === true && behavior.candidate !== true,
-  ).length;
-  const lockedAt = Date.parse(protocol.locked_at);
-  const baselineStartedAt = Date.parse(protocol.baseline_started_at);
-  const candidateStartedAt = Date.parse(protocol.candidate_started_at);
-  const expectedByteRatio =
-    cost.baseline_artifact_bytes > 0
-      ? cost.candidate_artifact_bytes / cost.baseline_artifact_bytes
-      : Number.NaN;
+  validateBlindedAdjudication(adjudication, fixture);
+  validateBlindedMeasurement(measurement, adjudication, fixture);
+  const expected = deriveBlindedForwardAggregate({
+    adjudication,
+    measurement,
+    fixture,
+    currentSkillFingerprint,
+    evaluatedAt: aggregate.evaluated_at,
+    platformValidation: aggregate.platform_validation,
+    limits: aggregate.limits,
+  });
+  const exactDerivation =
+    fingerprint(aggregate) === fingerprint(expected);
+  const behaviors = expected.forward_evaluation.required_behaviors;
+  const behaviorIds = behaviors.map((behavior) => behavior.id).sort();
   const protocolPassed =
     validateHeldoutForwardFixture(fixture) &&
-    protocol.fixture_status === "held-out" &&
-    protocol.held_out_from_iteration === true &&
-    protocol.rubric_locked_before_outputs === true &&
-    protocol.isolated_sessions === true &&
-    protocol.candidate_feedback_before_verdict === false &&
-    typeof protocol.model_id === "string" &&
-    protocol.model_id.length > 0 &&
-    Number.isFinite(lockedAt) &&
-    Number.isFinite(baselineStartedAt) &&
-    Number.isFinite(candidateStartedAt) &&
-    lockedAt <= baselineStartedAt &&
-    lockedAt <= candidateStartedAt &&
-    protocol.baseline_session_sha256 !==
-      protocol.candidate_session_sha256 &&
-    Object.entries(lockedFingerprints).every(
-      ([name, value]) => protocol[name] === value,
-    );
-  const costPassed =
-    Number.isInteger(cost.baseline_artifact_bytes) &&
-    cost.baseline_artifact_bytes > 0 &&
-    Number.isInteger(cost.candidate_artifact_bytes) &&
-    cost.candidate_artifact_bytes > 0 &&
-    typeof cost.artifact_byte_ratio === "number" &&
-    Math.abs(cost.artifact_byte_ratio - expectedByteRatio) < 1e-9 &&
-    cost.artifact_byte_ratio <=
-      fixture.cost_thresholds.candidate_artifact_bytes_max_ratio_to_baseline &&
-    Number.isInteger(cost.baseline_tool_calls) &&
-    cost.baseline_tool_calls >= 0 &&
-    Number.isInteger(cost.candidate_tool_calls) &&
-    cost.candidate_tool_calls >= 0 &&
-    cost.candidate_tool_calls <=
-      fixture.cost_thresholds.candidate_tool_calls_max &&
-    Number.isInteger(cost.candidate_heading_count) &&
-    cost.candidate_heading_count >= 0 &&
-    cost.candidate_heading_count <=
-      fixture.quality_thresholds.max_candidate_heading_count &&
-    cost.passed === true;
+    expected.protocol.same_model_and_tools === true &&
+    expected.protocol.independent_judge === true &&
+    expected.protocol.verdicts_recorded_before_unblind === true &&
+    expected.evidence_sources.adjudication_sha256 ===
+      fingerprint(adjudication) &&
+    expected.evidence_sources.measurement_sha256 ===
+      fingerprint(measurement);
   const forwardPassed =
-    aggregate.schema_version === 2 &&
-    aggregate.evidence_kind === "blinded-forward-aggregate" &&
-    Number.isFinite(Date.parse(aggregate.evaluated_at)) &&
-    aggregate.fixture === fixture.id &&
-    aggregate.candidate_skill_fingerprint === currentSkillFingerprint &&
-    aggregate.raw_outputs_published === false &&
+    exactDerivation &&
     protocolPassed &&
-    costPassed &&
-    aggregate.forward_evaluation?.same_model_and_tools === true &&
-    aggregate.forward_evaluation?.expected_findings_hidden === true &&
     JSON.stringify(behaviorIds) ===
       JSON.stringify(REQUIRED_HELDOUT_BEHAVIOR_IDS) &&
-    behaviors.every(
-      (behavior) =>
-        typeof behavior.id === "string" &&
-        typeof behavior.baseline === "boolean" &&
-        behavior.candidate === true,
-    ) &&
-    aggregate.forward_evaluation?.baseline_passed_behaviors ===
-      baselinePassed &&
-    aggregate.forward_evaluation?.candidate_passed_behaviors ===
-      candidatePassed &&
-    aggregate.forward_evaluation?.candidate_regressions ===
-      candidateRegressions &&
-    candidateRegressions === 0 &&
-    candidatePassed - baselinePassed >=
-      fixture.quality_thresholds.candidate_minimum_gain_over_baseline &&
-    aggregate.forward_evaluation?.false_positive_optimizations === 0 &&
-    aggregate.forward_evaluation?.passed === true;
+    expected.forward_evaluation.passed === true &&
+    expected.cost.passed === true;
   const platformPassed =
-    aggregate.platform_validation?.installer?.scope ===
-      "isolated-project-copy" &&
-    JSON.stringify(platforms.map((platform) => platform.id).sort()) ===
-      JSON.stringify(["claude-code", "codex"]) &&
-    platforms.every(
-      (platform) =>
-        typeof platform.version === "string" &&
-        platform.explicit_trigger === true &&
-        platform.target_and_reference_read === true &&
-        platform.positive_analysis === true &&
-        platform.negative_non_trigger === true &&
-        platform.stable_ids === true &&
-        platform.decision_boundary === true &&
-        platform.files_modified === false &&
-        platform.passed === true,
-    ) &&
-    aggregate.platform_validation?.passed === true;
+    exactDerivation &&
+    expected.platform_validation.passed === true;
   return {
     forward: {
       passed: forwardPassed,
       fixture: aggregate.fixture,
       candidate_skill_fingerprint: aggregate.candidate_skill_fingerprint,
-      baseline_passed_behaviors: baselinePassed,
-      candidate_passed_behaviors: candidatePassed,
-      candidate_regressions: candidateRegressions,
+      baseline_passed_behaviors:
+        expected.forward_evaluation.baseline_passed_behaviors,
+      candidate_passed_behaviors:
+        expected.forward_evaluation.candidate_passed_behaviors,
+      candidate_regressions:
+        expected.forward_evaluation.candidate_regressions,
       false_positive_optimizations:
-        aggregate.forward_evaluation?.false_positive_optimizations,
+        expected.forward_evaluation.false_positive_optimizations,
       protocol_passed: protocolPassed,
-      cost_passed: costPassed,
+      cost_passed: expected.cost.passed,
+      adjudication_sha256:
+        expected.evidence_sources.adjudication_sha256,
+      measurement_sha256:
+        expected.evidence_sources.measurement_sha256,
     },
     platform: {
       passed: platformPassed,
-      installer: aggregate.platform_validation?.installer,
-      platforms: platforms.map(({ id, version, passed }) => ({
+      installer: expected.platform_validation.installer,
+      platforms: expected.platform_validation.platforms.map(
+        ({ id, version, passed }) => ({
         id,
         version,
         passed,
-      })),
+        }),
+      ),
     },
   };
 }
+
+export {
+  buildBlindedAdjudication,
+  buildBlindedMeasurement,
+  deriveBlindedForwardAggregate,
+  inspectBlindedForwardAggregate,
+  validateBlindedAdjudication,
+  validateBlindedMeasurement,
+  verifyBlindedMeasurementSources,
+};
 
 /** Loads and validates the repository's publishable evaluation aggregate. */
 function loadForwardEvaluationAggregate() {
@@ -616,7 +588,7 @@ export function main(argv = process.argv.slice(2)) {
         ROOT,
         "evals",
         "cases",
-        "archive-release-resumption-heldout.json",
+        "candidate-cleanup-scoring-heldout.json",
       ),
       "utf8",
     ),

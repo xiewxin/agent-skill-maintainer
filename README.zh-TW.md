@@ -6,7 +6,7 @@ Agent Skill Maintainer 檢視任務中實際發生的事情，而不只相信 Sk
 
 [English](README.md)
 
-> **穩定版合同：** 本機分析、隔離候選實作、held-out 評測與發布 gate、唯讀 GitHub capability proof、分別確認的個人 Fork／合併／Release、可選的 branch-push-plus-PR 複合發布、受限的合併後續接，以及支援的全局 `npx skills` 精確 Release 本機更新路徑均已驗證。
+> **穩定版合同：** 本機分析、隔離候選實作、可追溯 held-out 評測與發布 gate、唯讀 GitHub capability proof、分別確認的個人 Fork／合併／Release、可選的 branch-push-plus-PR 複合發布、受限的合併後續接、支援的全局 `npx skills` 精確 Release 本機更新，以及精確 eligible candidate 的事務式清理路徑均已驗證。
 
 ## 它能做什麼
 
@@ -21,6 +21,7 @@ Agent Skill Maintainer 檢視任務中實際發生的事情，而不只相信 Sk
 - **完整檢查候選版本**：驗證回歸、安全、文件影響、可量測增益，以及過程檔或私密資料是否意外混入。
 - **控制發布風險**：先建立唯讀 capability proof。初次 branch push 與 PR 建立可維持分開，或使用一份精確 `publish_pr` 確認；合併及 Release 仍各自確認。管理者推到已驗證倉庫，貢獻者可複用已驗證個人 Fork，或透過獨立確認的動作建立。
 - **正式發布後更新支援的本機 Skill**：使用獨立預覽與確認、精確 Release commit、原子切換、失敗回滾及唯讀恢復；目前任務仍使用啟動時載入的版本。
+- **安全回收已完成且符合條件的候選**：使用獨立 source-state-bound 預覽、限時確認、attempt-first quarantine、刪除 proof 與不可重放的恢復；不擴大到父目錄，也不改寫 terminal run。
 
 它適合維護既有 Agent Skill；不是一般程式碼審查工具、全新 Skill 產生器，也不會在背景自動掃描所有 Skill。
 
@@ -64,6 +65,7 @@ OPT-001 優先依倉庫／使用者語言選擇，再使用 fallback。
 | 候選實作 | 經獨立確認的隔離 clone；已安裝及目前執行中的 Skill 保持不變 |
 | 完整驗證 | Diff 映射，以及安全、回歸、文件、可量測增益、隱私與倉庫衛生檢查 |
 | 發布控制 | Capability-bound 預覽、granular 或 compound branch／PR proof、明確停止 disposition，以及分開的合併／Release／本機更新確認 |
+| 候選清理 | 針對精確已整合候選的獨立 transaction，保留不可變 source audit、quarantine、proof 與恢復 |
 
 ## 為什麼不直接修改 Skill
 
@@ -112,7 +114,7 @@ npx skills add https://github.com/xiewxin/agent-skill-maintainer.git \
 ## 確定性 CLI（進階）
 
 <details>
-<summary>展開本機生命週期、GitHub 動作與本機更新命令</summary>
+<summary>展開本機生命週期、評測、GitHub、本機更新與清理命令</summary>
 
 Skill 也提供本機確定性 CLI：
 
@@ -224,6 +226,28 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 
 第一版只支援全局 `npx-skills` 安裝：規範 `.agents/skills/<skill>` 目錄透過正常符號連結供 Codex 與／或 Claude Code 共用。可辨識標準全局 v3 Lock 位置、絕對 `XDG_STATE_HOME` 及絕對 `CLAUDE_CONFIG_DIR`。binding、Lock、來源倉庫、Skill 子路徑、規範路徑指紋、已安裝樹及 Agent 連結必須全部一致。更新只讀取正式 Release 的精確 commit，拒絕來源符號連結與 Submodule，以原子方式切換規範目錄及 Lock，並把 Lock `ref` 推進到該 Release Tag；後置條件失敗時還原兩者，不會呼叫追蹤 latest 的通用更新。專案級、Copy、Plugin、手動及未知安裝會明確阻擋，不轉換成其他方法。
 
+符合條件的 completed candidate 可在之後透過獨立 transaction 清理。Preview 除了建立獨立 transaction 紀錄外不修改資源；必須先展示精確相對目標、指紋、檔案數與 bytes，確認後才能建立 approval：
+
+```bash
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-preview \
+  --state-root "$STATE_ROOT" --source-run-id "$SOURCE_RUN_ID" \
+  --candidate "$CANDIDATE_NAME" > cleanup-preview.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-approve \
+  --state-root "$STATE_ROOT" --preview cleanup-preview.json \
+  --confirmed-at "$CONFIRMED_AT" --expires-at "$EXPIRES_AT" \
+  > cleanup-approval.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-apply \
+  --state-root "$STATE_ROOT" --preview cleanup-preview.json \
+  --approval cleanup-approval.json > cleanup-proof.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-reconcile \
+  --state-root "$STATE_ROOT" --transaction-id "$TRANSACTION_ID" \
+  --finish false > cleanup-reconciliation.json
+```
+
+只有同一已核准 transaction 已把精確 candidate 移入 quarantine 時，才可使用 `cleanup-reconcile --finish true`。第一版不清理 run state、原始評測、source clone、父目錄、相鄰 candidate、aborted run 或 stop-after-PR candidate。
+
+盲測評分現在分為三份公開產物：解盲前 adjudication、由私有 outputs／events 重算的 measurement，以及衍生的 schema v3 aggregate。`eval-measure` 讀取私有 A／B 來源檔；`eval-adjudicate` 從私有隨機 assignment、session metadata 與 Judge output 計算 session／evidence 身分；`eval-derive` 再把兩份證據綁定到候選 Skill 指紋。原始輸出、seed 與未脫敏 Judge 證據仍只留本機。
+
 請在確認後把兩個時間變數設為新的 ISO 8601 時間，且有效期限應保持短暫。每份 transition updates 文件都必須包含目前已通過的 `validation_summary`、綁定 capability proof 的精確 `action_preview` 及其 approval 陣列；貢獻者 branch 或 `publish_pr` 動作還要帶入相符 `fork_proof`。生命週期會先驗證這些文件，再消費 approval。
 
 `github-fork-verify` 是唯讀動作；只有 `<active-account>/<upstream-name>` 可寫、parent 指向綁定 upstream，且包含核准 base commit 時才會複用。Fork 不存在時，可透過一個 `default_branch_only=true` 請求建立；非同步可見性或不確定回應會維持 `pending`，唯讀 reconcile 不會重送請求，CLI 也會提示稍後核對。GitHub 明確回傳 4xx 時會以脫敏原因標記 `blocked`；嘗試五分鐘後仍無法確認也會成為 `blocked`。兩者都必須人工調查，不能盲目重試。
@@ -241,6 +265,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 - installed／source 指紋檢查與確定性隔離 clone 候選；
 - 完整候選 Diff hash 與檔案到 `OPT-*` 的映射；
 - 安全、回歸、文件影響及可量測增益 gate；
+- 隨機 A／B、獨立 Judge session、逐 behavior verdict 證據、本機重算客觀 measurement，以及由兩份證據衍生的 schema v3 aggregate；
+- 獨立確認的 candidate cleanup，保留 source-run bytes、attempt-first quarantine、manifest 驗證、proof 與中斷 reconcile；
 - 唯讀複用或經獨立確認、僅嘗試一次的 active account 個人 Fork 建立，並檢查 owner、parent、權限、base commit、pending、blocked 與 drift；
 - 管理者倉庫與已驗證既存貢獻者 Fork 的乾淨候選分支建立／快進／已套用驗證，綁定精確 commit 與遠端前態，不替換歷史、不讀取候選本機傳輸設定，也不修改候選 remote；
 - 綁定狀態的 GitHub 預覽，以及 PR 建立／更新、合併與 Release 的確定性 apply；
@@ -258,7 +284,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 
 - worktree 建立、組織擁有或自訂名稱的 Fork，以及 Fork 同步或刪除；目前隔離路徑使用本機 clone，貢獻模式只支援 active account 的個人 Fork；
 - 專案級、Copy 模式、Plugin、手動或未知安裝方式的本機 Skill 更新；
-- 自主 GitHub 寫入、自動合併或發布、永久授權，以及候選資源清理。
+- 自主 GitHub 寫入、自動合併或發布，以及永久授權；
+- 清理 run state、原始評測、source clone、父目錄、相鄰候選、未整合候選，或無法精確證明歸屬的資源。
 
 ## 安全與隱私
 

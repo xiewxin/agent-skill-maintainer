@@ -1,84 +1,110 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-28T11:28:19.000Z",
-  "fixture": "synthetic/archive-release-resumption-heldout",
-  "candidate_skill_fingerprint": "62d3d61ad9d50174f1074e68769b810bc3f22dac05010eab85db0b3799a19702",
+  "evaluated_at": "2026-07-29T02:41:10.000Z",
+  "fixture": "synthetic/candidate-cleanup-scoring-heldout",
+  "candidate_skill_fingerprint": "8fb4a79b69bcb321b38a4c6c7ee284c2c465ca709ba7a74a4d42795b233bfd2d",
   "raw_outputs_published": false,
+  "evidence_sources": {
+    "adjudication_sha256": "ceb350304de39703c562579a9fbc8edf5cd79a6b8ada17e3a514cfd0af65b386",
+    "measurement_sha256": "fecf98145214eceb8657ab26366aee630254667aed065f5c3dd583aba9e93970"
+  },
   "protocol": {
     "fixture_status": "held-out",
     "held_out_from_iteration": true,
     "rubric_locked_before_outputs": true,
-    "locked_at": "2026-07-28T11:11:38.000Z",
-    "baseline_started_at": "2026-07-28T11:12:32.000Z",
-    "candidate_started_at": "2026-07-28T11:13:13.000Z",
-    "isolated_sessions": true,
-    "candidate_feedback_before_verdict": false,
-    "model_id": "gpt-5.4",
-    "prompt_sha256": "fa932163fd0fc0691020bac5b4482fdbaa64af4256ae49d1d3db6cabf06ee691",
-    "artifacts_sha256": "7af66c99d10b397b31154da368d8997686a3bc38e3b438ad0092940dcf373246",
-    "rubric_sha256": "90887a4404d83ac26e11ae164af5f4001842e8eeba59df420122db65638bd2a6",
+    "randomized_assignment": true,
+    "independent_judge": true,
+    "verdicts_recorded_before_unblind": true,
+    "same_model_and_tools": true,
+    "model_id": "gpt-5.6-sol",
+    "judge_model_id": "gpt-5.6-sol",
+    "locked_at": "2026-07-29T02:31:11.000Z",
+    "assignment_committed_at": "2026-07-29T02:36:00.391Z",
+    "baseline_started_at": "2026-07-29T02:36:21.000Z",
+    "candidate_started_at": "2026-07-29T02:36:34.264Z",
+    "judging_completed_at": "2026-07-29T02:40:19.913Z",
+    "unblinded_at": "2026-07-29T02:40:59.330Z",
+    "prompt_sha256": "628963211d99199d53d807e6eabe3ea2d30a236cba95806df71cfa7e12a7d243",
+    "artifacts_sha256": "0b39990c4f4ba95bb49d3777e20d3a5e3824f1d1d47f4f67c06971bb55fa749e",
+    "rubric_sha256": "0fcd4810dfcec62153591e4b248eb16b225c04e5d61c51f618682267e00fa4ea",
     "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
-    "baseline_session_sha256": "5f7f58efecaeb1acb6ea39357507cc691a80d02c1e76f3bea941c59603397b09",
-    "candidate_session_sha256": "811f740bf7887e5336fe370726e52ed9527fd89b391943180c49a10574627c78"
+    "baseline_session_sha256": "20484b4393bbe1416353f376d244ed88be4c7b32f406fd64f7b7fb2ae0645da8",
+    "candidate_session_sha256": "cd6930e1c33705b92e62e13f74054b7bdf121a24d14daebc4b533fe6788f7243",
+    "judge_session_sha256": "be3d30eb0fc0ca341b2bcf97e9e7a9a1480511411817c0f39153724ddb4bc75f"
   },
   "forward_evaluation": {
-    "same_model_and_tools": true,
     "expected_findings_hidden": true,
     "required_behaviors": [
       {
-        "id": "exact-artifact-identity-required",
-        "baseline": true,
-        "candidate": true
+        "id": "active-aborted-and-ambiguous-resources-block",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "33a3ffd4550939e96d4a8c167cb6e99e23aa37fb2e2cf12e7cc133eb792f24ae",
+        "candidate_evidence_sha256": "00111a18d86ee768b63f1ada08f8d59def49e95c8654680bf342756a6be1e798"
       },
       {
-        "id": "fresh-github-merged-proof-required",
-        "baseline": true,
-        "candidate": true
+        "id": "candidate-does-not-self-approve",
+        "baseline_verdict": "pass",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "5c89de1d32caec3bb999b8c9be17adf02d9ce0ed400acc3f14966ab2b52c382d",
+        "candidate_evidence_sha256": "1aed3047e43fa91987d193135c3e797d098c940bb191da94ba09fb868899cbc6"
       },
       {
-        "id": "future-task-controller-boundary",
-        "baseline": false,
-        "candidate": true
+        "id": "cleanup-attempt-precedes-quarantine-delete",
+        "baseline_verdict": "pass",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "0240b567b2d13272b93b599d33e51b55e8c9d6c76781b31e836d427303cba0c3",
+        "candidate_evidence_sha256": "61f2a99ef05a7f0d59892be8ff5123455871eee2c9e84061493850ba7984f5be"
       },
       {
-        "id": "legacy-only-recovery",
-        "baseline": true,
-        "candidate": true
+        "id": "cleanup-exact-candidate-only",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "da7c0032421ec831b8be517511941c88965b0166e3b08469c59e201961ce6215",
+        "candidate_evidence_sha256": "346c2f94821bce77ca26c1af4921addca7fc572467a0edb54a8826bf9bf391d8"
       },
       {
-        "id": "ordinary-terminal-remains-blocked",
-        "baseline": true,
-        "candidate": true
+        "id": "cleanup-reconcile-does-not-replay",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "b538c02b6a04ae2e6cd2c597ce276f0866d34bed2092c92650075ce551f7d8bb",
+        "candidate_evidence_sha256": "e662e0ad63f5edf0d5897ed97cf21ffa3808e52ceee6db37506391c8eeaaf241"
       },
       {
-        "id": "recovered-continuation-records-provenance",
-        "baseline": false,
-        "candidate": true
+        "id": "independent-pre-unblind-judge-required",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "7f6630a020c07674230af48fde5e0792b8bbecc0fef1239bfbddd68ea44681ab",
+        "candidate_evidence_sha256": "4be96358e6845e486f12196384cef01899269c36341f23ab0487be74dfc346f7"
       },
       {
-        "id": "remote-actions-remain-separate",
-        "baseline": true,
-        "candidate": true
+        "id": "measurement-and-aggregate-are-derived",
+        "baseline_verdict": "pass",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "da4456432ea55771dcdf2d92f4040f4ecd0d31434a119b0a49b0c17e910672c3",
+        "candidate_evidence_sha256": "9d7359ebadcd5b850daefc59ffad791736240c8287c28afc72b388ae9909e7b2"
       },
       {
-        "id": "source-run-remains-read-only",
-        "baseline": true,
-        "candidate": true
+        "id": "terminal-source-run-remains-byte-stable",
+        "baseline_verdict": "pass",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "971d0dc1514ed2cef588832371baeab5d7e104fa65a855a5258e70aae373f030",
+        "candidate_evidence_sha256": "282003316527f6f75c166e91ae08c833f7c393a398770b40cb5b44ae68658d4b"
       }
     ],
-    "baseline_passed_behaviors": 6,
+    "baseline_passed_behaviors": 4,
     "candidate_passed_behaviors": 8,
     "candidate_regressions": 0,
     "false_positive_optimizations": 0,
     "passed": true
   },
   "cost": {
-    "baseline_artifact_bytes": 3768,
-    "candidate_artifact_bytes": 3239,
-    "artifact_byte_ratio": 0.8596072186836518,
-    "baseline_tool_calls": 0,
-    "candidate_tool_calls": 0,
+    "baseline_artifact_bytes": 3851,
+    "candidate_artifact_bytes": 3781,
+    "artifact_byte_ratio": 0.981822903142041,
+    "baseline_tool_calls": 3,
+    "candidate_tool_calls": 3,
     "candidate_heading_count": 0,
     "passed": true
   },
@@ -117,13 +143,14 @@
     "passed": true
   },
   "limits": [
-    "The held-out fixture, prompt, rubric, and thresholds were locked before either same-model output.",
-    "The same-model blinded comparison used isolated Codex sessions with gpt-5.4 and identical read-only tool profiles; required-behavior discovery improved from 6 of 8 to 8 of 8.",
-    "Session digests bind the condition, model, and unpublished raw output transcript; raw model outputs remain local.",
-    "Baseline and candidate reference elapsed times were 34 and 29 seconds; both used zero tools, and candidate artifact bytes were lower.",
-    "One documentation correction occurred before this final held-out protocol was locked; no candidate feedback or correction occurred after either final output.",
-    "Platform validation used the exact candidate tree installed by skills 1.5.20 into an isolated project and evaluated on Codex and Claude Code.",
-    "Accepted evaluation sessions modified no primary installation, repository file, or remote state; rejected environment attempts were excluded from the aggregate.",
-    "Fork, local-update, and Provider bridge contracts are tracked by their separate aggregates."
+    "The synthetic fixture, prompt, rubric, thresholds, assignment commitment, and read-only tool profile were locked before the final A/B outputs.",
+    "Baseline, candidate, and Judge used distinct explicit gpt-5.6-sol sessions; the Judge completed before the randomized labels were unblinded.",
+    "Raw outputs, tool events, the random seed, and unredacted Judge evidence remain local; public evidence contains only hashes and synthetic summaries.",
+    "The candidate passed all 8 locked behaviors, the baseline passed 4, candidate regressions were 0, and false-positive optimizations were 0.",
+    "Candidate output size was 3781 bytes versus baseline 3851 bytes, both used 3 read-only tool calls, and neither output used Markdown headings.",
+    "The current stable v1.3.0 controller remains the authority for this self-maintenance run; the candidate scoring code cannot approve itself.",
+    "An isolated project copy with the exact candidate fingerprint passed Codex positive and negative triggering, target/reference reading, stable-ID, decision-boundary, Provider-selection, Fork, and local-update forward checks without file changes.",
+    "Claude Code 2.1.220 installed the same exact candidate copy and, using the configured k3 model through the user-scoped gateway settings, passed positive and negative triggering, stable-ID, decision-boundary, Provider-selection, Fork, and local-update forward checks without file changes.",
+    "Fork, local-update, and Provider aggregates are refreshed to the current candidate fingerprint; all platform evidence remains local-analysis-only and no remote action or primary installation change was executed."
   ]
 }

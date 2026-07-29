@@ -795,6 +795,54 @@ export function buildCandidateSnapshot({
   return snapshot;
 }
 
+/** Revalidates a clean candidate checkout against one persisted snapshot. */
+export function validateCandidateCheckoutForCleanup(
+  candidatePath,
+  candidateSnapshot,
+) {
+  const expected = validateCandidateSnapshotContract(candidateSnapshot);
+  const candidate = realpathSync(resolve(candidatePath));
+  const repositoryPrefix = runGit(
+    candidate,
+    ["rev-parse", "--show-prefix"],
+    { readOnly: true, label: "Git cleanup preflight" },
+  ).trim();
+  if (repositoryPrefix !== "") {
+    throw new Error("cleanup candidate 必須指向 Git 根目錄");
+  }
+  const status = runGit(
+    candidate,
+    ["status", "--porcelain", "-z", "--untracked-files=all"],
+    {
+      binary: true,
+      readOnly: true,
+      label: "Git cleanup preflight",
+    },
+  );
+  if (status.length > 0) {
+    throw new Error("cleanup candidate 已漂移或尚未提交");
+  }
+  const currentRepository = buildRepositorySnapshot(candidate, {
+    baseRef: expected.repository_snapshot.base_ref,
+    processArtifactPrefixes: expected.process_artifact_prefixes,
+  });
+  const currentDiff = readCandidateDiffState(candidate, currentRepository);
+  if (
+    canonicalJson(currentRepository) !==
+      canonicalJson(expected.repository_snapshot) ||
+    currentDiff.candidateDiffHash !== expected.candidate_diff_hash ||
+    canonicalJson(currentDiff.changedFiles) !==
+      canonicalJson(expected.changed_files)
+  ) {
+    throw new Error("cleanup candidate snapshot 已漂移");
+  }
+  return {
+    candidate_path: candidate,
+    repository_snapshot: currentRepository,
+    candidate_diff_hash: currentDiff.candidateDiffHash,
+  };
+}
+
 /** Revalidates a clean candidate before reserving a remote push attempt. */
 export function validateBranchPushCandidate(
   candidatePath,

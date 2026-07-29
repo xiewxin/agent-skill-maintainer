@@ -21,4 +21,4 @@ The maintainer must not:
 - replay a consumed approval in the same or another run;
 - publish raw conversations, secrets, personal information, private paths, or private source code.
 
-Remote writes and destructive cleanup always require an action-specific preview and confirmation.
+Remote writes and destructive cleanup always require an action-specific preview and confirmation. Candidate cleanup is limited to the exact direct-child checkout proven by an eligible completed run. It preserves the terminal source record, reserves an attempt before same-filesystem quarantine, rejects links and special files, and never expands to run state, raw evidence, source clones, adjacent resources, or parent directories.

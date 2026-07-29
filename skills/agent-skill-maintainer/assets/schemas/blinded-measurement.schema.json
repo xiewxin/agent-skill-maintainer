@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/blinded-measurement.schema.json",
+  "title": "Blinded Evaluation Measurement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_kind",
+    "fixture",
+    "measured_at",
+    "labels",
+    "derivation",
+    "raw_inputs_published",
+    "synthetic_fixture"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "evidence_kind": {"type": "string", "const": "blinded-measurement"},
+    "fixture": {"type": "string", "minLength": 1},
+    "measured_at": {"type": "string", "format": "date-time"},
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b"],
+      "properties": {
+        "a": {"$ref": "#/$defs/label_measurement"},
+        "b": {"$ref": "#/$defs/label_measurement"}
+      }
+    },
+    "derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["builder", "encoding", "tool_event_type", "heading_rule"],
+      "properties": {
+        "builder": {"type": "string", "const": "agent-skill-maintainer/blinded-measurement-v1"},
+        "encoding": {"type": "string", "const": "utf8"},
+        "tool_event_type": {"type": "string", "const": "tool_call"},
+        "heading_rule": {"type": "string", "const": "markdown-atx"}
+      }
+    },
+    "raw_inputs_published": {"type": "boolean", "const": false},
+    "synthetic_fixture": {"type": "boolean", "const": true}
+  },
+  "$defs": {
+    "label_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_sha256",
+        "events_sha256",
+        "artifact_bytes",
+        "tool_calls",
+        "heading_count"
+      ],
+      "properties": {
+        "output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "events_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "artifact_bytes": {"type": "integer", "minimum": 1},
+        "tool_calls": {"type": "integer", "minimum": 0},
+        "heading_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

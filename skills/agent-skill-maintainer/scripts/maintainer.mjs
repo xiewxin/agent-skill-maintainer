@@ -24,7 +24,10 @@ import {
   verifyExistingFork,
   validateBranchPushLocalState,
 } from "./lib/github.mjs";
-import { fingerprintCandidatePath } from "./lib/git.mjs";
+import {
+  fingerprintCandidatePath,
+  fingerprintTree,
+} from "./lib/git.mjs";
 import {
   applyLocalUpdate,
   buildLocalUpdateApproval,
@@ -45,6 +48,17 @@ import {
   reserveGithubActionApply,
   transitionRun,
 } from "./lib/state.mjs";
+import {
+  applyCleanup,
+  approveCleanup,
+  previewCleanup,
+  reconcileCleanup,
+} from "./lib/cleanup.mjs";
+import {
+  buildBlindedAdjudication,
+  buildBlindedMeasurement,
+  deriveBlindedForwardAggregate,
+} from "./lib/evaluation.mjs";
 
 const DEFAULT_STATE_ROOT = resolve(homedir(), ".agent-skill-maintainer");
 
@@ -69,6 +83,13 @@ function parseArguments(argv) {
       "update-approve",
       "update-apply",
       "update-reconcile",
+      "cleanup-preview",
+      "cleanup-approve",
+      "cleanup-apply",
+      "cleanup-reconcile",
+      "eval-measure",
+      "eval-adjudicate",
+      "eval-derive",
     ].includes(command)
   ) {
     throw new Error("未知或缺少命令");
@@ -169,6 +190,55 @@ function parseArguments(argv) {
       "approval",
       "binding",
       "installed",
+    ]),
+    "cleanup-preview": new Set([
+      "state-root",
+      "source-run-id",
+      "candidate",
+      "candidates-root",
+      "previewed-at",
+    ]),
+    "cleanup-approve": new Set([
+      "state-root",
+      "preview",
+      "confirmed-at",
+      "expires-at",
+    ]),
+    "cleanup-apply": new Set([
+      "state-root",
+      "preview",
+      "approval",
+      "candidates-root",
+    ]),
+    "cleanup-reconcile": new Set([
+      "state-root",
+      "transaction-id",
+      "candidates-root",
+      "finish",
+    ]),
+    "eval-measure": new Set([
+      "fixture",
+      "label-a-output",
+      "label-a-events",
+      "label-b-output",
+      "label-b-events",
+      "measured-at",
+    ]),
+    "eval-adjudicate": new Set([
+      "fixture",
+      "assignment",
+      "sessions",
+      "judge-output",
+      "measurement",
+      "unblinded-at",
+    ]),
+    "eval-derive": new Set([
+      "fixture",
+      "adjudication",
+      "measurement",
+      "candidate-skill",
+      "template",
+      "evaluated-at",
     ]),
   }[command];
   const supplied = [
@@ -587,6 +657,141 @@ function execute(
       },
     );
     return result;
+  }
+  if (command === "cleanup-preview") {
+    return previewCleanup({
+      stateRoot: values["state-root"] ?? DEFAULT_STATE_ROOT,
+      sourceRunId: required(values, "source-run-id"),
+      candidateName: required(values, "candidate"),
+      candidatesRoot: values["candidates-root"],
+      previewedAt:
+        values["previewed-at"] ?? new Date().toISOString(),
+    });
+  }
+  if (command === "cleanup-approve") {
+    return approveCleanup(
+      values["state-root"] ?? DEFAULT_STATE_ROOT,
+      readJsonFile(
+        required(values, "preview"),
+        "Candidate cleanup preview",
+      ),
+      {
+        confirmedAt: required(values, "confirmed-at"),
+        expiresAt: required(values, "expires-at"),
+      },
+    );
+  }
+  if (command === "cleanup-apply") {
+    return applyCleanup({
+      stateRoot: values["state-root"] ?? DEFAULT_STATE_ROOT,
+      preview: readJsonFile(
+        required(values, "preview"),
+        "Candidate cleanup preview",
+      ),
+      approval: readJsonFile(
+        required(values, "approval"),
+        "Candidate cleanup approval",
+      ),
+      candidatesRoot: values["candidates-root"],
+    });
+  }
+  if (command === "cleanup-reconcile") {
+    const finish = values.finish ?? "false";
+    if (!["true", "false"].includes(finish)) {
+      throw new Error("--finish 只接受 true 或 false");
+    }
+    return reconcileCleanup({
+      stateRoot: values["state-root"] ?? DEFAULT_STATE_ROOT,
+      transactionId: required(values, "transaction-id"),
+      candidatesRoot: values["candidates-root"],
+      finish: finish === "true",
+    });
+  }
+  if (command === "eval-measure") {
+    return buildBlindedMeasurement({
+      fixture: readJsonFile(
+        required(values, "fixture"),
+        "Held-out fixture",
+      ),
+      labelA: {
+        output: readFileSync(
+          required(values, "label-a-output"),
+          "utf8",
+        ),
+        events: JSON.parse(
+          readFileSync(
+            required(values, "label-a-events"),
+            "utf8",
+          ),
+        ),
+      },
+      labelB: {
+        output: readFileSync(
+          required(values, "label-b-output"),
+          "utf8",
+        ),
+        events: JSON.parse(
+          readFileSync(
+            required(values, "label-b-events"),
+            "utf8",
+          ),
+        ),
+      },
+      measuredAt: values["measured-at"] ?? new Date().toISOString(),
+    });
+  }
+  if (command === "eval-adjudicate") {
+    return buildBlindedAdjudication({
+      fixture: readJsonFile(
+        required(values, "fixture"),
+        "Held-out fixture",
+      ),
+      assignment: readJsonFile(
+        required(values, "assignment"),
+        "Private A/B assignment",
+      ),
+      sessions: readJsonFile(
+        required(values, "sessions"),
+        "Private session metadata",
+      ),
+      judgeOutput: readJsonFile(
+        required(values, "judge-output"),
+        "Private Judge output",
+      ),
+      measurement: readJsonFile(
+        required(values, "measurement"),
+        "Blinded measurement",
+      ),
+      unblindedAt: required(values, "unblinded-at"),
+    });
+  }
+  if (command === "eval-derive") {
+    const fixture = readJsonFile(
+      required(values, "fixture"),
+      "Held-out fixture",
+    );
+    const template = readJsonFile(
+      required(values, "template"),
+      "Aggregate template",
+    );
+    return deriveBlindedForwardAggregate({
+      adjudication: readJsonFile(
+        required(values, "adjudication"),
+        "Blinded adjudication",
+      ),
+      measurement: readJsonFile(
+        required(values, "measurement"),
+        "Blinded measurement",
+      ),
+      fixture,
+      currentSkillFingerprint: fingerprintTree(
+        required(values, "candidate-skill"),
+      ),
+      evaluatedAt:
+        values["evaluated-at"] ?? new Date().toISOString(),
+      platformValidation: template.platform_validation,
+      limits: template.limits,
+    });
   }
   throw new Error(`未知命令：${command}`);
 }

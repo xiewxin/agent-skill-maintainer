@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "evidence_kind": "provider-validation-aggregate",
-  "evaluated_at": "2026-07-28T11:28:19.000Z",
+  "evaluated_at": "2026-07-29T03:57:36.000Z",
   "case_measurements_evaluated_at": "2026-07-28T05:02:21.000Z",
   "case_measurements_reused_without_rerun": true,
-  "candidate_bridge_evaluated_at": "2026-07-28T11:28:19.000Z",
-  "candidate_skill_fingerprint": "62d3d61ad9d50174f1074e68769b810bc3f22dac05010eab85db0b3799a19702",
+  "candidate_bridge_evaluated_at": "2026-07-29T03:57:36.000Z",
+  "candidate_skill_fingerprint": "8fb4a79b69bcb321b38a4c6c7ee284c2c465ca709ba7a74a4d42795b233bfd2d",
   "raw_outputs_published": false,
   "local_installations_modified": false,
   "cases": [

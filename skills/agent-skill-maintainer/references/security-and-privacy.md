@@ -16,6 +16,8 @@ Local state contains only versioned bindings, run stage, hashes, decisions, appr
 
 Local-update previews, proofs, reconciliation, and run state must not persist home directories or other absolute paths. Store only the declared relative installation contract, repository identity, release commit, fingerprints, statuses, and redacted failure categories. Temporary staging and backup directories are removed after verified success or verified rollback; an unprovable recovery is left blocked for manual inspection rather than silently deleting possible recovery data.
 
-Public examples use fictional neutral data. Publication validation must reject secrets, private paths, raw feedback, and process documents.
+Cleanup previews and proofs likewise store no absolute paths. The independent local transaction may retain a regular-file manifest for the exact candidate checkout, but it must never follow symlinks, expand its target to a parent, or include unrelated local resources. Quarantine is inside the fixed candidates root. Uncertain ownership or recovery remains visible and blocked instead of being hidden by broad recursive deletion.
+
+Blinded raw outputs, events, randomization seed, and private Judge evidence remain local. Public adjudication contains only synthetic redacted rationales and evidence hashes; public measurement and aggregate contain hashes and recomputable summaries. Publication validation must reject secrets, private paths, raw feedback, raw outputs, and process documents.
 
 Candidate validation must inspect every changed file, including already tracked files. Always block this maintainer's run state and raw evaluation outputs. Also load target-repository exclusions from its active guidance and ignore contract; a matching changed file is a blocker even when Git already tracks it.

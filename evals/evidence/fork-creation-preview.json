@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "evidence_kind": "fork-forward-aggregate",
-  "evaluated_at": "2026-07-28T11:33:00.000Z",
+  "evaluated_at": "2026-07-29T03:57:36.000Z",
   "fixture": "synthetic/fork-creation",
-  "candidate_skill_fingerprint": "62d3d61ad9d50174f1074e68769b810bc3f22dac05010eab85db0b3799a19702",
+  "candidate_skill_fingerprint": "8fb4a79b69bcb321b38a4c6c7ee284c2c465ca709ba7a74a4d42795b233bfd2d",
   "raw_outputs_published": false,
   "remote_actions_executed": false,
   "platforms": [
