@@ -6,7 +6,7 @@ Agent Skill Maintainer reviews what actually happened in a task—not just what 
 
 [繁體中文](README.zh-TW.md)
 
-> **Stable contract:** local analysis, isolated candidate implementation, held-out evaluation and release gates, read-only GitHub capability proof, separately confirmed personal Fork／merge／Release actions, optional compound branch-push-plus-PR publication, bounded post-merge continuation, and an exact-Release local update path for supported global `npx skills` installs are validated.
+> **Stable contract:** local analysis, isolated candidate implementation, traceable held-out evaluation and release gates, read-only GitHub capability proof, separately confirmed personal Fork／merge／Release actions, optional compound branch-push-plus-PR publication, bounded post-merge continuation, an exact-Release local update path, and transactional cleanup of exact eligible candidate checkouts are validated.
 
 ## What can it do?
 
@@ -21,6 +21,7 @@ Point it at one Skill and give it evidence from the current task, a past experie
 - **Review the complete candidate** for regressions, safety, documentation impact, measurable gain, and accidental process-file or private-data leakage.
 - **Prepare and control publication** with a read-only capability proof and state-bound confirmations. Initial branch push and PR creation may stay granular or use one exact `publish_pr` confirmation; merge and Release remain separate. Maintainers push to the verified repository; contributors reuse a verified personal Fork or create it through its own confirmed action.
 - **Update a supported installed Skill after publication** through a separate preview and confirmation, exact Release commit materialization, atomic replacement, rollback, and read-only recovery. The current task keeps using the version it loaded at startup.
+- **Reclaim an eligible completed candidate safely** through a separate source-state-bound preview, expiring approval, attempt-first quarantine, deletion proof, and non-replay recovery. It never broadens cleanup to a parent directory or rewrites the terminal run.
 
 It is designed for maintainers improving an existing Agent Skill. It is not a general code reviewer, a new-Skill generator, or an autonomous background scanner.
 
@@ -64,6 +65,7 @@ If the evidence does not justify a change, “no improvement needed” is a vali
 | Candidate implementation | A separately approved isolated clone; the installed and currently executing Skill remain unchanged |
 | Validation | Complete Diff mapping plus safety, regression, documentation, measurable-gain, privacy, and repository-hygiene checks |
 | Publication | Capability-bound previews, granular or compound branch／PR proofs, explicit stop dispositions, and separate merge／Release／local-update confirmations |
+| Candidate cleanup | A separate transaction for an exact integrated candidate, with immutable source audit, quarantine, proof, and recovery |
 
 ## Why not just edit the Skill?
 
@@ -112,7 +114,7 @@ Specify the target Skill when known. Without one, the maintainer may show only c
 ## Deterministic CLI (advanced)
 
 <details>
-<summary>Show local lifecycle, GitHub action, and local update commands</summary>
+<summary>Show local lifecycle, evaluation, GitHub action, update, and cleanup commands</summary>
 
 The Skill also exposes a local deterministic CLI:
 
@@ -224,6 +226,28 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs update-reconcile \
 
 The first supported installation contract is a global `npx-skills` install whose canonical `.agents/skills/<skill>` directory is shared with Codex and／or Claude Code through the normal symlink layout. The standard global v3 Lock location, absolute `XDG_STATE_HOME`, and absolute `CLAUDE_CONFIG_DIR` are recognized. The binding, Lock, source repository, Skill subpath, canonical path fingerprint, installed tree, and Agent links must all agree. The update reads only the exact official Release commit, rejects source symlinks and submodules, atomically switches the canonical directory and lock entry, advances the Lock `ref` to that Release tag, and restores both on a failed postcondition. It never calls a generic “update latest” path. Project, copy, plugin, manual, and unknown installs are blocked instead of being converted to another method.
 
+An eligible completed candidate can be cleaned later through its own transaction. Preview is read-only except for the independent transaction record; create the approval only after showing its exact relative target, fingerprints, file count, and bytes:
+
+```bash
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-preview \
+  --state-root "$STATE_ROOT" --source-run-id "$SOURCE_RUN_ID" \
+  --candidate "$CANDIDATE_NAME" > cleanup-preview.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-approve \
+  --state-root "$STATE_ROOT" --preview cleanup-preview.json \
+  --confirmed-at "$CONFIRMED_AT" --expires-at "$EXPIRES_AT" \
+  > cleanup-approval.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-apply \
+  --state-root "$STATE_ROOT" --preview cleanup-preview.json \
+  --approval cleanup-approval.json > cleanup-proof.json
+node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-reconcile \
+  --state-root "$STATE_ROOT" --transaction-id "$TRANSACTION_ID" \
+  --finish false > cleanup-reconciliation.json
+```
+
+`cleanup-reconcile --finish true` is allowed only when that same approved transaction already quarantined the exact candidate. The first version cleans no run state, raw evaluation, source clone, parent directory, adjacent candidate, aborted run, or stop-after-PR candidate.
+
+Blinded scoring now has three public artifacts: pre-unblind adjudication, measurement recomputed from private outputs and events, and a derived schema v3 aggregate. `eval-measure` reads the private A／B source files; `eval-adjudicate` computes session and evidence identities from the private randomized assignment, session metadata, and Judge output; `eval-derive` binds both documents to the candidate Skill fingerprint. Raw outputs, the seed, and unredacted Judge evidence remain local.
+
 Set both time variables to fresh ISO 8601 timestamps after confirmation; the expiry should be short-lived. Each transition-updates document must contain the current passed `validation_summary`, exact capability-bound `action_preview`, and its approval array; contributor branch or `publish_pr` actions also include the bound `fork_proof`. The lifecycle validates these documents before consuming the approval.
 
 `github-fork-verify` is read-only and reuses only `<active-account>/<upstream-name>` when it is writable, points to the bound upstream, and exposes the approved base commit. A missing Fork may be created with one `default_branch_only=true` request; asynchronous visibility or an uncertain response stays `pending`, and read-only reconciliation never repeats the request. The CLI tells the user to reconcile later. An explicit GitHub 4xx refusal is `blocked` with a redacted reason; a result still unresolved after five minutes is also `blocked`. Both require manual investigation rather than a blind retry.
@@ -241,6 +265,8 @@ Available and tested locally:
 - installed/source fingerprint checks and deterministic isolated-clone candidates;
 - complete candidate Diff hashing and file-to-`OPT-*` mapping;
 - validation gates for safety, regression, documentation impact, and measurable gain;
+- randomized A／B adjudication with a distinct Judge session, per-behavior verdict evidence, locally recomputed objective measurement, and a schema v3 aggregate derived from both evidence documents;
+- separately confirmed candidate cleanup with immutable source-run bytes, attempt-first quarantine, manifest validation, proof, and interrupted-attempt reconciliation;
 - read-only reuse or separately confirmed single-attempt creation of the active account's personal Fork, with owner, parent, permission, base-commit, pending, blocked, and drift checks;
 - clean-candidate branch creation／fast-forward／already-applied verification for managed repositories and verified existing contributor forks, with exact commit and remote-prestate binding and without history replacement, candidate-local transport configuration, or candidate-remote mutation;
 - state-bound GitHub previews and deterministic apply for PR creation, update, merge, and Release;
@@ -258,7 +284,8 @@ Intentionally unsupported in this version:
 
 - worktree creation, organization-owned or custom-named Forks, and Fork synchronization or deletion; the current isolated path uses a local clone and contributor mode supports only the active account's personal Fork;
 - project-scoped, copy-mode, plugin, manual, or unknown local Skill updates;
-- autonomous GitHub writes, automatic merge or release, permanent authorization, and candidate-resource cleanup.
+- autonomous GitHub writes, automatic merge or release, and permanent authorization;
+- cleanup of run state, raw evaluations, source clones, parent directories, adjacent candidates, non-integrated candidates, or resources whose exact ownership cannot be proven.
 
 ## Safety and privacy
 

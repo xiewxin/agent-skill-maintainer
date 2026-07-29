@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "blinded-adjudication",
+  "fixture": "synthetic/candidate-cleanup-scoring-heldout",
+  "rubric_sha256": "0fcd4810dfcec62153591e4b248eb16b225c04e5d61c51f618682267e00fa4ea",
+  "assignment": {
+    "method": "randomized-a-b",
+    "committed_at": "2026-07-29T02:36:00.391Z",
+    "seed_commitment_sha256": "a265a8158043471b5c8ad224fc55754f387f758ac7b776024425d1cc40a67f13",
+    "baseline_label": "a",
+    "candidate_label": "b"
+  },
+  "sessions": {
+    "label_a": {
+      "model_id": "gpt-5.6-sol",
+      "session_sha256": "20484b4393bbe1416353f376d244ed88be4c7b32f406fd64f7b7fb2ae0645da8",
+      "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
+      "started_at": "2026-07-29T02:36:21.000Z",
+      "completed_at": "2026-07-29T02:37:28.678Z",
+      "output_sha256": "1ad7c88ef8fd3e0d3effa4204d5c91c1ceb2a14879aa306a7910798d106ae3fd"
+    },
+    "label_b": {
+      "model_id": "gpt-5.6-sol",
+      "session_sha256": "cd6930e1c33705b92e62e13f74054b7bdf121a24d14daebc4b533fe6788f7243",
+      "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
+      "started_at": "2026-07-29T02:36:34.264Z",
+      "completed_at": "2026-07-29T02:37:21.269Z",
+      "output_sha256": "d64765d88bdc114a47ca1a6fefb3151e0b95a21d6ca97f473419940ec1751298"
+    },
+    "judge": {
+      "model_id": "gpt-5.6-sol",
+      "session_sha256": "be3d30eb0fc0ca341b2bcf97e9e7a9a1480511411817c0f39153724ddb4bc75f",
+      "started_at": "2026-07-29T02:38:06.876Z",
+      "completed_at": "2026-07-29T02:40:19.913Z",
+      "output_sha256": "1d31028d0c4f5666ea5a96051963f62afb4ba72b2fe1d969b8e0fd34e9fe4e18"
+    }
+  },
+  "judging": {
+    "started_at": "2026-07-29T02:38:06.876Z",
+    "completed_at": "2026-07-29T02:40:19.913Z",
+    "unblinded_at": "2026-07-29T02:40:59.330Z",
+    "expected_findings_hidden": true,
+    "labels_hidden_from_judge": true
+  },
+  "behaviors": [
+    {
+      "id": "active-aborted-and-ambiguous-resources-block",
+      "label_a": {
+        "verdict": "fail",
+        "rationale_summary": "阻擋了 active、aborted、漂移、連結與多種不明確資源，但未明確阻擋特殊檔案，未完整符合鎖定行為。",
+        "evidence_sha256": "33a3ffd4550939e96d4a8c167cb6e99e23aa37fb2e2cf12e7cc133eb792f24ae"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "明確阻擋 aborted、active-referenced、漂移、symlink、特殊檔案及其他非精確候選。",
+        "evidence_sha256": "00111a18d86ee768b63f1ada08f8d59def49e95c8654680bf342756a6be1e798"
+      }
+    },
+    {
+      "id": "candidate-does-not-self-approve",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "維持穩定控制器的審核與批准權，明確禁止候選機制自行批准發布及相關操作。",
+        "evidence_sha256": "5c89de1d32caec3bb999b8c9be17adf02d9ce0ed400acc3f14966ab2b52c382d"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "明確由目前穩定控制器掌握 gate，候選保持隔離且不得自行批准。",
+        "evidence_sha256": "1aed3047e43fa91987d193135c3e797d098c940bb191da94ba09fb868899cbc6"
+      }
+    },
+    {
+      "id": "cleanup-attempt-precedes-quarantine-delete",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "要求 mutation 前持久化一次性 attempt，同檔案系統原子 quarantine，驗證後僅刪除 quarantine 目標。",
+        "evidence_sha256": "0240b567b2d13272b93b599d33e51b55e8c9d6c76781b31e836d427303cba0c3"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "完整描述一次性 attempt、同檔案系統原子隔離、manifest 複核及只刪除隔離目錄。",
+        "evidence_sha256": "61f2a99ef05a7f0d59892be8ff5123455871eee2c9e84061493850ba7984f5be"
+      }
+    },
+    {
+      "id": "cleanup-exact-candidate-only",
+      "label_a": {
+        "verdict": "fail",
+        "rationale_summary": "目前雖阻擋 source clone，但將原因表述為證明不足，並暗示補證後可能納入，未建立 source clone 永遠排除的精確候選限定。",
+        "evidence_sha256": "da7c0032421ec831b8be517511941c88965b0166e3b08469c59e201961ce6215"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "只允許精確完成 run 的直接子候選，並明確排除 source clone、父目錄、run state、raw evaluation 與相鄰候選。",
+        "evidence_sha256": "346c2f94821bce77ca26c1af4921addca7fc572467a0edb54a8826bf9bf391d8"
+      }
+    },
+    {
+      "id": "cleanup-reconcile-does-not-replay",
+      "label_a": {
+        "verdict": "fail",
+        "rationale_summary": "禁止盲目重試，但 reconcile 分類未採用要求的 pending/applied 語義，也未清楚限定只能完成同一已 quarantine 的交易。",
+        "evidence_sha256": "b538c02b6a04ae2e6cd2c597ce276f0866d34bed2092c92650075ce551f7d8bb"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "明確禁止重跑 apply，依原位置與 quarantine 狀態分類，且 pending 僅能續做同一交易。",
+        "evidence_sha256": "e662e0ad63f5edf0d5897ed97cf21ffa3808e52ceee6db37506391c8eeaaf241"
+      }
+    },
+    {
+      "id": "independent-pre-unblind-judge-required",
+      "label_a": {
+        "verdict": "fail",
+        "rationale_summary": "要求獨立 Judge、不同 generator sessions 與解盲時序，但未明確要求隨機化 A/B labels，逐行為 verdict schema 也不完整。",
+        "evidence_sha256": "7f6630a020c07674230af48fde5e0792b8bbecc0fef1239bfbddd68ea44681ab"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "完整要求預先隨機 A/B assignment、三個不同 session、逐行為裁決與 evidence hash，且須在解盲前完成。",
+        "evidence_sha256": "4be96358e6845e486f12196384cef01899269c36341f23ab0487be74dfc346f7"
+      }
+    },
+    {
+      "id": "measurement-and-aggregate-are-derived",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "拒絕人工布林摘要作 gate，要求由本機 raw outputs/events 重算指標並以證據指紋支撐統計與門檻。",
+        "evidence_sha256": "da4456432ea55771dcdf2d92f4040f4ecd0d31434a119b0a49b0c17e910672c3"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "明確要求 measurement document 從本機來源推導，並由綁定 adjudication/measurement 指紋的 aggregate 重新計算結果。",
+        "evidence_sha256": "9d7359ebadcd5b850daefc59ffad791736240c8287c28afc72b388ae9909e7b2"
+      }
+    },
+    {
+      "id": "terminal-source-run-remains-byte-stable",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "明確保持 terminal source run 不可變，並把 preview、approval、attempt、quarantine、proof 與 reconciliation 放入獨立交易。",
+        "evidence_sha256": "971d0dc1514ed2cef588832371baeab5d7e104fa65a855a5258e70aae373f030"
+      },
+      "label_b": {
+        "verdict": "pass",
+        "rationale_summary": "明確要求 terminal source run byte-for-byte 不變，所有清理狀態由獨立版本化交易持有。",
+        "evidence_sha256": "282003316527f6f75c166e91ae08c833f7c393a398770b40cb5b44ae68658d4b"
+      }
+    }
+  ],
+  "quality": {
+    "false_positive_optimizations": 0,
+    "rationale_summary": "兩份輸出均未產生 OPT-*，也未把不具證據的額外最佳化宣稱包裝為已驗證改善。",
+    "evidence_sha256": "98a22cd6acc2c064836c5e711b5ca440402bf6db84ac997a0723608c34728a56"
+  },
+  "derivation": {
+    "builder": "agent-skill-maintainer/blinded-adjudication-v1",
+    "assignment_rule": "seed-first-byte-parity",
+    "evidence_hash_rule": "canonical-json-redacted-evidence-summary",
+    "session_hash_rule": "canonical-json-private-session-metadata"
+  },
+  "raw_outputs_published": false,
+  "synthetic_fixture": true
+}

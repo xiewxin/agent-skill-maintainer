@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "blinded-measurement",
+  "fixture": "synthetic/candidate-cleanup-scoring-heldout",
+  "measured_at": "2026-07-29T02:38:20.000Z",
+  "labels": {
+    "a": {
+      "output_sha256": "1ad7c88ef8fd3e0d3effa4204d5c91c1ceb2a14879aa306a7910798d106ae3fd",
+      "events_sha256": "f85a7ef225c1483e908c9c4efd29aa35f69f25f4c6f5e60f15e2ba5faf00902d",
+      "artifact_bytes": 3851,
+      "tool_calls": 3,
+      "heading_count": 0
+    },
+    "b": {
+      "output_sha256": "d64765d88bdc114a47ca1a6fefb3151e0b95a21d6ca97f473419940ec1751298",
+      "events_sha256": "f85a7ef225c1483e908c9c4efd29aa35f69f25f4c6f5e60f15e2ba5faf00902d",
+      "artifact_bytes": 3781,
+      "tool_calls": 3,
+      "heading_count": 0
+    }
+  },
+  "derivation": {
+    "builder": "agent-skill-maintainer/blinded-measurement-v1",
+    "encoding": "utf8",
+    "tool_event_type": "tool_call",
+    "heading_rule": "markdown-atx"
+  },
+  "raw_inputs_published": false,
+  "synthetic_fixture": true
+}

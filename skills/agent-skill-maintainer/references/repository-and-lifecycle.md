@@ -36,7 +36,13 @@ Branch push requires a clean fully committed candidate whose canonical path fing
 
 `publish_pr` applies that exact branch operation first, then creates the exact initial Pull Request. It records both proofs when complete. If the branch is verified but PR state is unobservable, it records non-replayable `pending` plus branch proof and permits only read-only reconcile. If read-only checks prove the PR absent, it records `partial`; only that state may enter granular `pr_creation` with a fresh preview and confirmation. It never repeats the push or broadens the compound action to merge.
 
-Abort invalidates approvals but does not delete candidate work. Cleanup requires a separate preview containing the exact run and resources.
+Abort invalidates approvals and never makes its candidate eligible for automatic cleanup. Cleanup is not a lifecycle transition and never appends to a terminal source run. It uses a separate versioned transaction under the local state root.
+
+The first cleanup path accepts only the exact direct-child candidate checkout under the fixed managed candidates root. The source run must be `completed`, retain a complete candidate snapshot, and end after verified merge, verified Release, or verified local update. A stop after PR, active continuation, active run with the same candidate identity, unknown ownership, candidate or source-state drift, symlink, special file, or path outside the fixed root blocks before approval.
+
+Preview records only the candidate's relative name plus path, source-state, candidate-identity and full-tree fingerprints, file count, and bytes. A private transaction manifest retains regular-file hashes so interrupted deletion can be reconciled without following links or accepting new content. Approval is short-lived, bound to the exact preview, and single use. Apply revalidates all evidence, persists the attempt, atomically renames the checkout into `.quarantine/<transaction-id>` on the same filesystem, verifies the manifest, and then removes only that quarantined directory. It does not delete run state, raw evaluation, source clones, parent directories, or adjacent candidates.
+
+Reconcile never repeats apply. Original present and quarantine absent is `not_applied`; quarantine present is `pending` until an explicit finish of the same transaction; neither present after a reserved attempt is `applied`; both present or any unknown content is `blocked`. The source run bytes must match before proof is recorded. Candidate cleanup affects storage only and does not make the current task hot-switch to another Skill version.
 
 Local run state is versioned and written atomically. A short operation lock serializes state writes; entering isolated implementation also acquires a persistent lease for the binding. Another run cannot implement the same binding until the owning run reaches a terminal state. A stale short lock may be recovered only when its owner process no longer exists.
 

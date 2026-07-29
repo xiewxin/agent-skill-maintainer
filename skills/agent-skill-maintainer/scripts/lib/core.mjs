@@ -49,6 +49,13 @@ export const SCHEMA_NAMES = Object.freeze([
   "github-action-reconciliation",
   "publish-pr-proof",
   "blinded-forward-aggregate",
+  "blinded-adjudication",
+  "blinded-measurement",
+  "cleanup-preview",
+  "cleanup-approval",
+  "cleanup-transaction",
+  "cleanup-proof",
+  "cleanup-reconciliation",
 ]);
 
 export const PROVIDER_IDS = Object.freeze([

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/cleanup-transaction.schema.json",
+  "title": "Candidate Cleanup Transaction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "transaction_id",
+    "source_run_id",
+    "binding_id",
+    "status",
+    "preview",
+    "manifest",
+    "reconciliations"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "transaction_id": {"type": "string", "pattern": "[a-f0-9]{32}"},
+    "source_run_id": {"type": "string", "minLength": 1},
+    "binding_id": {"type": "string", "minLength": 1},
+    "status": {
+      "type": "string",
+      "enum": [
+        "previewed",
+        "approved",
+        "attempted",
+        "quarantined",
+        "pending",
+        "not_applied",
+        "applied",
+        "blocked"
+      ]
+    },
+    "preview": {"type": "object"},
+    "approval": {"type": "object"},
+    "manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "mode"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "enum": ["directory", "file"]},
+          "mode": {"type": "integer"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+        }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted_at", "approval_fingerprint", "preview_fingerprint"],
+      "properties": {
+        "attempted_at": {"type": "string", "format": "date-time"},
+        "approval_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    },
+    "quarantine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path"],
+      "properties": {
+        "relative_path": {"type": "string", "pattern": "\\.quarantine/[a-f0-9]{32}"}
+      }
+    },
+    "proof": {"type": "object"},
+    "reconciliations": {"type": "array", "items": {"type": "object"}}
+  }
+}

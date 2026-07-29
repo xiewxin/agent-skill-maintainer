@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/cleanup-preview.schema.json",
+  "title": "Candidate Cleanup Preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action",
+    "transaction_id",
+    "source_run_id",
+    "source_state_sha256",
+    "binding_id",
+    "candidate",
+    "candidate_identity",
+    "completion_kind",
+    "previewed_at",
+    "fingerprint"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "action": {"type": "string", "const": "candidate_cleanup"},
+    "transaction_id": {"type": "string", "pattern": "[a-f0-9]{32}"},
+    "source_run_id": {"type": "string", "minLength": 1},
+    "source_state_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "binding_id": {"type": "string", "minLength": 1},
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "relative_path",
+        "canonical_path_fingerprint",
+        "tree_fingerprint",
+        "file_count",
+        "total_bytes"
+      ],
+      "properties": {
+        "kind": {"type": "string", "const": "candidate_checkout"},
+        "relative_path": {"type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,127}"},
+        "canonical_path_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "tree_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "file_count": {"type": "integer", "minimum": 1},
+        "total_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "candidate_identity": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "completion_kind": {
+      "type": "string",
+      "enum": ["stop_after_merge", "stop_after_release", "local_update_verified"]
+    },
+    "previewed_at": {"type": "string", "format": "date-time"},
+    "fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+  }
+}

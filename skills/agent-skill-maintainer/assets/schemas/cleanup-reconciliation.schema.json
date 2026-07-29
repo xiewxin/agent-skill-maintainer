@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/cleanup-reconciliation.schema.json",
+  "title": "Candidate Cleanup Reconciliation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action",
+    "transaction_id",
+    "source_run_id",
+    "approval_fingerprint",
+    "observed_at",
+    "status",
+    "details"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "action": {"type": "string", "const": "candidate_cleanup"},
+    "transaction_id": {"type": "string", "pattern": "[a-f0-9]{32}"},
+    "source_run_id": {"type": "string", "minLength": 1},
+    "approval_fingerprint": {
+      "type": ["string", "null"],
+      "pattern": "[a-f0-9]{64}"
+    },
+    "observed_at": {"type": "string", "format": "date-time"},
+    "status": {
+      "type": "string",
+      "enum": ["not_applied", "pending", "applied", "blocked"]
+    },
+    "details": {"type": "string", "minLength": 1}
+  }
+}

@@ -2,9 +2,11 @@
 
 Establish a no-skill baseline before evaluating the candidate. Compare the same model, prompt, artifacts, and tools without revealing expected findings.
 
-A publishable same-model blinded A/B must use a fixture held out from optimization iteration. Before either output exists, lock the rubric and the prompt, artifact, model, and tool identities. Run baseline and candidate in distinct sessions; do not give candidate feedback before the verdict. The public aggregate must bind hashes for the prompt, supplied artifacts, rubric, tool profile, and both distinct session identities, plus timestamps proving the lock preceded both runs. Raw outputs remain local and unpublished.
+A publishable same-model blinded A/B must use a fixture held out from optimization iteration. Before either output exists, lock the rubric and the prompt, artifact, model, and tool identities, then commit a randomized A／B assignment whose mapping is derived from the committed seed. Run baseline and candidate in distinct sessions with the same model and tools. A third session owns adjudication, sees only labels A and B, records one `pass`, `fail`, or `insufficient_evidence` verdict plus a redacted rationale and private evidence summary for every locked behavior, and completes before unblinding. The local adjudication builder verifies the seed mapping and timing, then computes the public session, Judge-output, and redacted-evidence hashes; do not hand-author those identities. The Judge session must differ from both generator sessions. Candidate feedback before the verdict, early unblinding, session reuse, missing verdict evidence, and `insufficient_evidence` all block the publishable gate.
 
-Measure discovery, false positives, ownership, closure, actionability, correction count, elapsed reference time, tool calls, artifact bytes, and any fixture-specific structural limit. Lock quality and cost thresholds before viewing candidate results. Recomputable counts and cost ratios must agree with the published aggregate. Do not collect or estimate Token usage.
+Measure discovery, false positives, ownership, closure, actionability, correction count, elapsed reference time, tool calls, artifact bytes, and any fixture-specific structural limit. Lock quality and cost thresholds before viewing candidate results. The local measurement builder reads the unpublished outputs and event records, computes UTF-8 bytes, tool-call counts, heading counts, and source hashes, and verifies the resulting measurement before raw sources are removed. Deterministic code validates identities, time ordering, hashes, and derivation; it never assigns semantic verdicts.
+
+The publishable aggregate is schema v3 and must be derived from the adjudication and measurement documents. It binds both document fingerprints, maps A／B verdicts only after unblinding, and recomputes behavior counts, regressions, false positives, cost ratios, and pass booleans. Editing a naked summary cannot change the result. Schema v2 boolean summaries may be identified for historical inspection but cannot satisfy the current Release gate.
 
 A Preview or stable release requires:
 
@@ -15,7 +17,7 @@ A Preview or stable release requires:
 - false-positive and cost values within locked limits;
 - all platforms claimed as supported passing installation, positive and negative triggering, and local analysis.
 
-Equal or worse results are not evidence of benefit and block publication. Publish only synthetic methodology and aggregate results; never publish raw conversations or private code.
+Equal or worse results are not evidence of benefit and block publication. Public evidence may contain only synthetic, non-attributable adjudication summaries, measurements, and derived aggregates. Raw outputs, private evidence locators, conversations, and private code remain local.
 
 ## Stable Provider gate
 

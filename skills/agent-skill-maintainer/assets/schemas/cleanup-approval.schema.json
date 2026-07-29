@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/cleanup-approval.schema.json",
+  "title": "Candidate Cleanup Approval",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action",
+    "transaction_id",
+    "source_run_id",
+    "preview_fingerprint",
+    "confirmed_at",
+    "expires_at",
+    "fingerprint"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "action": {"type": "string", "const": "candidate_cleanup"},
+    "transaction_id": {"type": "string", "pattern": "[a-f0-9]{32}"},
+    "source_run_id": {"type": "string", "minLength": 1},
+    "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "confirmed_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+  }
+}
