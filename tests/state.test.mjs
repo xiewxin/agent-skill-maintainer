@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -39,6 +40,9 @@ import {
   transitionRun,
   withBindingLock,
 } from "../skills/agent-skill-maintainer/scripts/lib/state.mjs";
+import {
+  runMaintainerCommand,
+} from "../skills/agent-skill-maintainer/scripts/maintainer.mjs";
 
 const REPOSITORY_SNAPSHOT = Object.freeze({
   schema_version: 1,
@@ -682,6 +686,235 @@ test("merge completion is explicit and can seed one verified release continuatio
       "run-source",
     );
     assert.deepEqual(continuation.merge_proof, mergeProof);
+  });
+});
+
+test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
+  withStateRoot((root) => {
+    createRun(root, {
+      runId: "run-legacy",
+      bindingId: "binding-001",
+      target: {
+        skill: "example-skill",
+        repository: "example/skill",
+      },
+    });
+    for (const [phase, updates] of [
+      ["evidence_collection", {}],
+      ["feedback_validation", {}],
+      ["optimization_design", {}],
+      ["optimization_approval", {}],
+      [
+        "isolation",
+        {
+          repository_snapshot: REPOSITORY_SNAPSHOT,
+          approvals: [implementationApproval("run-legacy")],
+        },
+      ],
+      ["implementation", {}],
+      ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
+      [
+        "branch_push",
+        {
+          validation_summary: VALIDATION_SUMMARY,
+          ...actionEvidence("branch_push", {
+            runId: "run-legacy",
+          }),
+        },
+      ],
+      [
+        "pr_creation",
+        {
+          branch_push_proof: BRANCH_PUSH_PROOF,
+          validation_summary: VALIDATION_SUMMARY,
+          ...actionEvidence("pr_create", {
+            runId: "run-legacy",
+          }),
+        },
+      ],
+    ]) {
+      transitionRun(root, "run-legacy", phase, { updates });
+    }
+    transitionRun(root, "run-legacy", "completed", {
+      updates: {
+        pr_proof: PR_PROOF,
+        completion_disposition: {
+          schema_version: 1,
+          kind: "stop_after_pr",
+          after_phase: "pr_creation",
+          reason: "Legacy controller stopped after publication handoff.",
+        },
+      },
+    });
+    const mergeProof = {
+      schema_version: 1,
+      repository: "example/skill",
+      pr_number: 1,
+      merge_commit: MERGE_COMMIT,
+      default_branch: "main",
+    };
+    assert.throws(
+      () =>
+        createPublicationContinuation(root, {
+          sourceRunId: "run-legacy",
+          runId: "run-v8-stop-after-pr",
+          bindingId: "binding-001",
+          mergeProof,
+        }),
+      /只有明確 stop_after_merge 或可驗證 legacy_completed/u,
+    );
+
+    const sourcePath = join(
+      root,
+      "runs",
+      "run-legacy",
+      "state.json",
+    );
+    const legacy = JSON.parse(readFileSync(sourcePath, "utf8"));
+    legacy.schema_version = 7;
+    delete legacy.completion_disposition;
+    writeFileSync(sourcePath, `${JSON.stringify(legacy)}\n`, "utf8");
+
+    let observations = 0;
+    let liveState = "MERGED";
+    const githubRunner = (arguments_) => {
+      observations += 1;
+      assert.deepEqual(arguments_, [
+        "pr",
+        "view",
+        "1",
+        "--repo",
+        "example/skill",
+        "--json",
+        "number,baseRefName,headRefOid,state,mergedAt,mergeCommit",
+      ]);
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          number: 1,
+          baseRefName: "main",
+          headRefOid: REPOSITORY_SNAPSHOT.head_commit,
+          state: liveState,
+          mergedAt: "2026-07-28T08:55:24.000Z",
+          mergeCommit: { oid: MERGE_COMMIT },
+        }),
+        stderr: "",
+      };
+    };
+
+    assert.throws(
+      () =>
+        createPublicationContinuation(
+          root,
+          {
+            sourceRunId: "run-legacy",
+            runId: "run-release-invalid",
+            bindingId: "binding-001",
+            mergeProof: {
+              ...mergeProof,
+              merge_commit: "0".repeat(40),
+            },
+          },
+          { githubRunner },
+        ),
+      /merge proof.*GitHub/u,
+    );
+    assert.equal(
+      existsSync(
+        join(root, "runs", "run-release-invalid", "state.json"),
+      ),
+      false,
+    );
+    assert.equal(
+      JSON.parse(readFileSync(sourcePath, "utf8")).schema_version,
+      7,
+    );
+
+    liveState = "OPEN";
+    assert.throws(
+      () =>
+        createPublicationContinuation(
+          root,
+          {
+            sourceRunId: "run-legacy",
+            runId: "run-release-open",
+            bindingId: "binding-001",
+            mergeProof,
+          },
+          { githubRunner },
+        ),
+      /merge proof.*GitHub/u,
+    );
+    assert.equal(
+      existsSync(
+        join(root, "runs", "run-release-open", "state.json"),
+      ),
+      false,
+    );
+    assert.equal(
+      JSON.parse(readFileSync(sourcePath, "utf8")).schema_version,
+      7,
+    );
+
+    liveState = "MERGED";
+    const mergeProofPath = join(root, "merge-proof.json");
+    writeFileSync(
+      mergeProofPath,
+      `${JSON.stringify(mergeProof)}\n`,
+      "utf8",
+    );
+    const continuation = runMaintainerCommand(
+      [
+        "publication-continue",
+        "--state-root",
+        root,
+        "--source-run-id",
+        "run-legacy",
+        "--run-id",
+        "run-release",
+        "--binding-id",
+        "binding-001",
+        "--merge-proof",
+        mergeProofPath,
+      ],
+      { githubRunner },
+    );
+    assert.equal(observations, 3);
+    assert.equal(
+      continuation.continuation.source_completion_kind,
+      "legacy_completed",
+    );
+    assert.match(
+      continuation.continuation
+        .legacy_merge_verification_fingerprint,
+      /^[a-f0-9]{64}$/u,
+    );
+    assert.deepEqual(continuation.merge_proof, mergeProof);
+    assert.equal(
+      JSON.parse(readFileSync(sourcePath, "utf8")).schema_version,
+      7,
+    );
+
+    const continuationPath = join(
+      root,
+      "runs",
+      "run-release",
+      "state.json",
+    );
+    const tampered = JSON.parse(
+      readFileSync(continuationPath, "utf8"),
+    );
+    delete tampered.continuation
+      .legacy_merge_verification_fingerprint;
+    writeFileSync(
+      continuationPath,
+      `${JSON.stringify(tampered)}\n`,
+      "utf8",
+    );
+    assert.throws(
+      () => readRun(root, "run-release"),
+      /缺少唯讀 merge verification/u,
+    );
   });
 });
 

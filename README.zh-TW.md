@@ -194,6 +194,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs publication-continue \
   --binding-id "$BINDING_ID" --merge-proof merge-proof.json
 ```
 
+對遷移後的 pre-v8 `legacy_completed` run，這也是唯一支援的恢復路徑。命令會先要求既有 candidate、validation 與 PR proof 完整，再唯讀重查已合併 PR，逐項比對 repository、number、base、candidate head、merge commit 與獨立 merge proof。恢復時只在記憶體遷移來源，不改寫該 terminal 審計紀錄；新的 continuation 會記錄 source-state、merge-proof 與 live-verification 指紋。任一不一致都在建立 continuation run 或 lease 前停止，不重做 merge 或其他遠端寫入。
+
 正式發布 proof 已存在後，支援的本機更新也使用獨立預覽、approval、生命週期 transition、apply 與唯讀 reconcile：
 
 ```bash

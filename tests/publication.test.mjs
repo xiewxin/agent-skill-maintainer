@@ -513,6 +513,7 @@ test("required public files and maintainer guidance exist", () => {
     ".agents/adr/0003-deterministic-fork-creation.md",
     ".agents/adr/0004-deterministic-local-skill-update.md",
     "evals/cases/sample-cleanup-forward.json",
+    "evals/cases/archive-release-resumption-heldout.json",
     "evals/cases/fork-creation-forward.json",
     "evals/cases/local-update-forward.json",
   ];
@@ -1705,14 +1706,14 @@ test("forward fixture keeps positive discovery and negative non-trigger contract
   );
 });
 
-test("held-out fixture locks publication continuation A/B before outputs", () => {
+test("held-out fixture locks archived release resumption A/B before outputs", () => {
   const fixture = JSON.parse(
-    read("evals/cases/release-continuation-heldout.json"),
+    read("evals/cases/archive-release-resumption-heldout.json"),
   );
   assert.equal(validateHeldoutForwardFixture(fixture), true);
   assert.equal(
     fixture.id,
-    "synthetic/deployment-continuation-heldout",
+    "synthetic/archive-release-resumption-heldout",
   );
   assert.equal(fixture.required_behaviors.length, 8);
   assert.equal(fixture.raw_outputs_published, false);

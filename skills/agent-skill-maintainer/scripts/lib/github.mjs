@@ -1196,6 +1196,81 @@ function verifyMergedPullRequest(preview, runner) {
   return buildMergeProof(preview, pullRequest);
 }
 
+/** Verifies a separately persisted legacy merge proof through fresh reads only. */
+export function verifyLegacyPublicationMerge(
+  {
+    repository,
+    prProof,
+    mergeProof,
+  },
+  { runner = defaultRunner } = {},
+) {
+  if (
+    typeof repository !== "string" ||
+    !REPOSITORY_PATTERN.test(repository)
+  ) {
+    throw new Error("Legacy publication repository 格式不合法");
+  }
+  validateDocument("pr-proof", prProof);
+  validateDocument("merge-proof", mergeProof);
+  if (
+    prProof.repository !== repository ||
+    prProof.state !== "open" ||
+    prProof.checks_passed !== true ||
+    mergeProof.repository !== repository ||
+    mergeProof.pr_number !== prProof.number ||
+    mergeProof.default_branch !== prProof.base_branch
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy merge proof 與既有 Pull Request 證明不一致",
+    );
+  }
+  const pullRequest = parseGithubJson(
+    runGithub(runner, [
+      "pr",
+      "view",
+      String(prProof.number),
+      "--repo",
+      repository,
+      "--json",
+      "number,baseRefName,headRefOid,state,mergedAt,mergeCommit",
+    ]),
+    "GitHub legacy merged Pull Request",
+  );
+  const observedProof = {
+    schema_version: 1,
+    repository,
+    pr_number: pullRequest.number,
+    merge_commit: pullRequest.mergeCommit?.oid,
+    default_branch: pullRequest.baseRefName,
+  };
+  if (
+    pullRequest.number !== prProof.number ||
+    pullRequest.baseRefName !== prProof.base_branch ||
+    pullRequest.headRefOid !== prProof.head_commit ||
+    pullRequest.state !== "MERGED" ||
+    typeof pullRequest.mergedAt !== "string" ||
+    typeof pullRequest.mergeCommit?.oid !== "string" ||
+    canonicalJson(observedProof) !== canonicalJson(mergeProof)
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy merge proof 與 GitHub 合併狀態不一致",
+    );
+  }
+  validateDocument("merge-proof", observedProof);
+  return {
+    merge_proof: observedProof,
+    verification_fingerprint: fingerprint({
+      repository,
+      pr_number: prProof.number,
+      base_branch: prProof.base_branch,
+      head_commit: prProof.head_commit,
+      merge_commit: observedProof.merge_commit,
+      merged_at: pullRequest.mergedAt,
+    }),
+  };
+}
+
 /** Re-reads the active account, repository permission, and mutation target. */
 export function inspectGithubActionState(
   preview,

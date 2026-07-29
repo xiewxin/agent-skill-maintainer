@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "evidence_kind": "local-update-forward-aggregate",
-  "evaluated_at": "2026-07-28T10:19:47.000Z",
+  "evaluated_at": "2026-07-28T11:33:00.000Z",
   "fixture": "synthetic/local-update",
-  "candidate_skill_fingerprint": "f11a211ce423f856ce1412509530f7dac5e99033bc50ff3cd7924a6fbf69a5e1",
+  "candidate_skill_fingerprint": "62d3d61ad9d50174f1074e68769b810bc3f22dac05010eab85db0b3799a19702",
   "raw_outputs_published": false,
   "local_installations_modified": false,
   "controlled_installation": {

@@ -264,6 +264,7 @@ function execute(
           "Merge proof",
         ),
       },
+      { githubRunner },
     );
   }
   if (command === "validate") {

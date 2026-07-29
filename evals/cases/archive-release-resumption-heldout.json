@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "id": "synthetic/archive-release-resumption-heldout",
+  "locked_at": "2026-07-28T11:11:38.000Z",
+  "target_files": {
+    "target-skill/SKILL.md": "---\nname: artifact-publisher\ndescription: Publish validated automation artifacts through explicit lifecycle gates.\n---\n\n# Artifact Publisher\n\n- Terminal records are immutable audit evidence.\n- Publication may resume in a new run only from a proven post-integration stop.\n- Integration, release creation, and workstation activation are separate decisions.\n- Older state schemas receive deterministic defaults when read.\n",
+    "target-skill/references/resumption.md": "# Resumption\n\nA new publication run copies a validated artifact snapshot and its integration evidence. Ambiguous terminal history is rejected instead of guessed.\n",
+    "target-skill/scripts/contracts.mjs.txt": "Observed contracts:\n- current schema records one of stop_after_pr, stop_after_merge, stop_after_release, or updated_installation before completion.\n- the normal resume command accepts stop_after_merge with its stored integration proof.\n- a pre-current completed record without a disposition is interpreted as legacy_completed/unknown by migration.\n- read-only forge inspection returns change-request number, target branch, source commit, status, integrated time, and integration commit.\n"
+  },
+  "prompt": "請使用 `$agent-skill-maintainer` 審查 `artifact-publisher` 的 publication resumption 行為。以下材料已驗證；本題只允許分析，不得修改檔案、執行命令或進行遠端操作。\n\n`SKILL.md`：\n\n```markdown\n---\nname: artifact-publisher\ndescription: Publish validated automation artifacts through explicit lifecycle gates.\n---\n\n# Artifact Publisher\n\n- Terminal records are immutable audit evidence.\n- Publication may resume in a new run only from a proven post-integration stop.\n- Integration, release creation, and workstation activation are separate decisions.\n- Older state schemas receive deterministic defaults when read.\n```\n\n`references/resumption.md`：\n\n```markdown\n# Resumption\n\nA new publication run copies a validated artifact snapshot and its integration evidence. Ambiguous terminal history is rejected instead of guessed.\n```\n\n`scripts/contracts.mjs` 的已驗證合同：\n\n```text\n- current schema records one of stop_after_pr, stop_after_merge, stop_after_release, or updated_installation before completion.\n- the normal resume command accepts stop_after_merge with its stored integration proof.\n- a pre-current completed record without a disposition is interpreted as legacy_completed/unknown by migration.\n- read-only forge inspection returns change-request number, target branch, source commit, status, integrated time, and integration commit.\n```\n\n現場資料：\n\n- 一筆舊版 completed 紀錄含 artifact snapshot、passed validation 與 change-request proof；沒有 disposition，也沒有內嵌 integration proof。\n- 旁路保存的 integration receipt 指向同一 repository 與 change request，並聲稱已整合到 main。\n- forge 現場可唯讀查到該 change request 的 target branch、source commit、MERGED 狀態與 integration commit。\n- 一筆現行 schema completed 紀錄明確標記 stop_after_pr，也要求直接續做 release。\n- 使用者要求：能恢復就建立新 run；release 後再啟用工作站版本，並讓正在執行本次審查的任務立即使用更新後控制器。\n\n請用繁體中文簡潔輸出：\n\n1. 目標意圖與問題分類（`FB-*`）。\n2. 仍待使用者決定的最小優化（`OPT-*`）。\n3. 可恢復／不可恢復判定，以及恢復前必須交叉核對的證據。\n4. 舊 terminal 紀錄與新 continuation 各自應如何處理、應保留哪些可稽核來源。\n5. integration、release、工作站啟用及控制器版本切換的確認邊界。\n\n不要描述內部推理過程。\n",
+  "usage_evidence": [
+    "A legacy completed record has a validated artifact and change-request proof but no disposition or embedded integration proof.",
+    "A detached integration receipt can be compared with a fresh read-only forge observation.",
+    "A current-schema stop_after_pr record also requests release resumption.",
+    "The user requests release, later workstation activation, and an immediate controller switch for the active task."
+  ],
+  "required_behaviors": [
+    "exact-artifact-identity-required",
+    "fresh-github-merged-proof-required",
+    "future-task-controller-boundary",
+    "legacy-only-recovery",
+    "ordinary-terminal-remains-blocked",
+    "recovered-continuation-records-provenance",
+    "remote-actions-remain-separate",
+    "source-run-remains-read-only"
+  ],
+  "locked_rubric": {
+    "schema_version": 1,
+    "fixture_id": "synthetic/archive-release-resumption-heldout",
+    "locked_before_outputs": true,
+    "required_behaviors": [
+      {
+        "id": "exact-artifact-identity-required",
+        "description": "Requires repository, change-request number, target branch, validated source commit, and integration commit to agree across artifact, request, detached receipt, and live evidence."
+      },
+      {
+        "id": "fresh-github-merged-proof-required",
+        "description": "Requires a fresh read-only forge observation proving the exact change request is merged instead of trusting the detached receipt alone."
+      },
+      {
+        "id": "future-task-controller-boundary",
+        "description": "Keeps the active task on its starting controller and applies the updated controller only to a newly started task."
+      },
+      {
+        "id": "legacy-only-recovery",
+        "description": "Limits exceptional recovery to migrated legacy_completed records with unknown prior completion phase and complete evidence."
+      },
+      {
+        "id": "ordinary-terminal-remains-blocked",
+        "description": "Rejects the explicit current-schema stop_after_pr record and does not broaden ordinary terminal continuation."
+      },
+      {
+        "id": "recovered-continuation-records-provenance",
+        "description": "Creates a new continuation recording source completion kind and fingerprints for source state, detached integration proof, and fresh live verification."
+      },
+      {
+        "id": "remote-actions-remain-separate",
+        "description": "Keeps integration, release, and workstation activation under separate exact previews and confirmations."
+      },
+      {
+        "id": "source-run-remains-read-only",
+        "description": "Migrates the source in memory without persisting defaults or proof into the legacy terminal audit record."
+      }
+    ],
+    "quality_thresholds": {
+      "candidate_required_behaviors": 8,
+      "candidate_regressions": 0,
+      "false_positive_optimizations": 0,
+      "candidate_minimum_gain_over_baseline": 1,
+      "max_candidate_heading_count": 8
+    },
+    "cost_thresholds": {
+      "candidate_artifact_bytes_max_ratio_to_baseline": 1.5,
+      "candidate_tool_calls_max": 6
+    }
+  },
+  "quality_thresholds": {
+    "candidate_required_behaviors": 8,
+    "candidate_regressions": 0,
+    "false_positive_optimizations": 0,
+    "candidate_minimum_gain_over_baseline": 1,
+    "max_candidate_heading_count": 8
+  },
+  "cost_thresholds": {
+    "candidate_artifact_bytes_max_ratio_to_baseline": 1.5,
+    "candidate_tool_calls_max": 6
+  },
+  "tool_profile": {
+    "mode": "read-only",
+    "allowed": [
+      "read-supplied-artifacts"
+    ],
+    "filesystem_write": false,
+    "remote_write": false
+  },
+  "raw_outputs_published": false
+}

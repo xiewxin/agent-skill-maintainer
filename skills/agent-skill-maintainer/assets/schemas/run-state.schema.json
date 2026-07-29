@@ -106,7 +106,15 @@
         "schema_version": {"type": "integer", "const": 1},
         "source_run_id": {"type": "string", "minLength": 1},
         "source_state_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
-        "merge_proof_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"}
+        "merge_proof_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "source_completion_kind": {
+          "type": "string",
+          "enum": ["stop_after_merge", "legacy_completed"]
+        },
+        "legacy_merge_verification_fingerprint": {
+          "type": "string",
+          "pattern": "[a-f0-9]{64}"
+        }
       }
     }
   }
