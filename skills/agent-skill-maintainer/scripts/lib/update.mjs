@@ -36,13 +36,17 @@ import {
   ApprovalDriftError,
   canonicalJson,
   clone,
+  compareUtf8,
   fingerprint,
   isObject,
   redactText,
   resolveCandidatePath,
   validateDocument,
 } from "./core.mjs";
-import { fingerprintTree } from "./git.mjs";
+import {
+  fingerprintTree,
+  fingerprintTreeEntries,
+} from "./git.mjs";
 
 const REPOSITORY_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]{1,100}$/u;
@@ -652,7 +656,7 @@ function readPublishedSkillTree(repository, commit, skillPath, runner) {
     throw new Error("發布 Skill 子樹缺少 SKILL.md");
   }
   files.sort((first, second) =>
-    first.relative_path.localeCompare(second.relative_path));
+    compareUtf8(first.relative_path, second.relative_path));
   return {
     tree_sha: folderEntry.sha,
     files,
@@ -703,7 +707,7 @@ function readPublishedFiles(repository, tree, runner) {
   return files;
 }
 
-/** Computes the same content fingerprint as fingerprintTree from memory. */
+/** Computes the same mode/path/blob fingerprint as fingerprintTree. */
 function fingerprintPublishedFiles(files) {
   const root = new Map();
   for (const file of files) {
@@ -725,25 +729,15 @@ function fingerprintPublishedFiles(files) {
     }
     directory.set(name, { kind: "file", file });
   }
-  const digest = createHash("sha256");
-  const visit = (directory, prefix = "") => {
-    const names = [...directory.keys()].sort((first, second) =>
-      first.localeCompare(second));
-    for (const name of names) {
-      const entry = directory.get(name);
-      const path = prefix.length === 0 ? name : `${prefix}/${name}`;
-      if (entry.kind === "directory") {
-        visit(entry.children, path);
-      } else {
-        digest.update(`file\0${path}\0`, "utf8");
-        digest.update(
-          createHash("sha256").update(entry.file.payload).digest(),
-        );
-      }
-    }
-  };
-  visit(root);
-  return digest.digest("hex");
+  return fingerprintTreeEntries(
+    files.map((file) => ({
+      mode: file.mode,
+      path: file.relative_path,
+      sha256: createHash("sha256")
+        .update(file.payload)
+        .digest("hex"),
+    })),
+  );
 }
 
 /** Writes a validated published Skill tree to a fresh staging directory. */

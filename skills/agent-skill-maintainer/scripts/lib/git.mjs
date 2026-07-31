@@ -4,12 +4,15 @@
 
 import {
   chmodSync,
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
-  readlinkSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -29,6 +32,7 @@ import { spawnSync } from "node:child_process";
 import {
   canonicalJson,
   clone,
+  compareUtf8,
   fingerprint,
   isObject,
   resolveCandidatePath,
@@ -45,10 +49,7 @@ const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
 const GITHUB_HTTPS_REMOTE =
   /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/u;
-const IGNORED_FINGERPRINT_PARTS = new Set([
-  ".git",
-  "node_modules",
-]);
+const IGNORED_FINGERPRINT_PARTS = new Set([".git"]);
 const PULL_REQUEST_PATTERNS = [
   /\(#(?<number>[1-9][0-9]*)\)\s*$/g,
   /\bmerge pull request #(?<number>[1-9][0-9]*)\b/gi,
@@ -79,6 +80,17 @@ export function validateRef(ref, label = "ref") {
     throw new Error(`${label} 格式不合法`);
   }
   return ref;
+}
+
+/** Validates a full Git object ID before using it as a commit revision. */
+export function validateCommit(commit, label = "commit") {
+  if (
+    typeof commit !== "string" ||
+    !COMMIT_PATTERN.test(commit)
+  ) {
+    throw new Error(`${label} 格式不合法`);
+  }
+  return commit;
 }
 
 /** Builds a Git environment with graph overrides, prompts, and diff disabled. */
@@ -327,39 +339,362 @@ function updateComponent(digest, label, payload) {
   digest.update(payload);
 }
 
-/** Produces a stable tree fingerprint without following directory symlinks. */
+/** Returns the Git-compatible regular-file mode used by tree identity. */
+function regularFileMode(metadata) {
+  if (process.platform === "win32") {
+    return "100644";
+  }
+  return (metadata.mode & 0o111) === 0 ? "100644" : "100755";
+}
+
+/** Fingerprints regular-file hashes after one full relative-path byte sort. */
+export function fingerprintTreeEntries(entries) {
+  const ordered = [...entries].sort(
+    (first, second) => compareUtf8(first.path, second.path),
+  );
+  const digest = createHash("sha256");
+  for (const entry of ordered) {
+    if (
+      !["100644", "100755"].includes(entry.mode) ||
+      typeof entry.path !== "string" ||
+      entry.path.length === 0 ||
+      !FINGERPRINT_PATTERN.test(entry.sha256)
+    ) {
+      throw new Error("tree fingerprint entry 不合法");
+    }
+    digest.update(`${entry.mode}\0${entry.path}\0`, "utf8");
+    digest.update(Buffer.from(entry.sha256, "hex"));
+  }
+  return digest.digest("hex");
+}
+
+/** Produces a stable publishable tree fingerprint without following symlinks. */
 export function fingerprintTree(path) {
   const root = realpathSync(resolve(path));
   if (!statSync(root).isDirectory()) {
     throw new Error("fingerprint 目標必須是目錄");
   }
-  const digest = createHash("sha256");
-
+  const files = [];
   const visit = (directory) => {
     const entries = readdirSync(directory, { withFileTypes: true })
       .filter((entry) => !IGNORED_FINGERPRINT_PARTS.has(entry.name))
-      .sort((first, second) => first.name.localeCompare(second.name));
+      .sort((first, second) => compareUtf8(first.name, second.name));
     for (const entry of entries) {
       const absolute = join(directory, entry.name);
       const rel = relative(root, absolute).split(sep).join("/");
       const metadata = lstatSync(absolute);
       if (metadata.isSymbolicLink()) {
-        const payload = Buffer.from(readlinkSync(absolute), "utf8");
-        digest.update(`symlink\0${rel}\0`, "utf8");
-        digest.update(createHash("sha256").update(payload).digest());
+        throw new Error(`fingerprint 目標不可含 symlink：${rel}`);
       } else if (metadata.isDirectory()) {
         visit(absolute);
       } else if (metadata.isFile()) {
-        const payload = readFileSync(absolute);
-        digest.update(`file\0${rel}\0`, "utf8");
-        digest.update(createHash("sha256").update(payload).digest());
+        files.push({
+          mode: regularFileMode(metadata),
+          path: rel,
+          sha256: createHash("sha256")
+            .update(readFileSync(absolute))
+            .digest("hex"),
+        });
       } else {
         throw new Error(`不支援的 installed tree entry：${rel}`);
       }
     }
   };
   visit(root);
-  return digest.digest("hex");
+  return fingerprintTreeEntries(files);
+}
+
+/** Counts regular files in one tree without following symlinks. */
+export function countTreeFiles(path) {
+  const root = realpathSync(resolve(path));
+  if (!statSync(root).isDirectory()) {
+    throw new Error("file count 目標必須是目錄");
+  }
+  let count = 0;
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (IGNORED_FINGERPRINT_PARTS.has(entry.name)) {
+        continue;
+      }
+      const absolute = join(directory, entry.name);
+      const metadata = lstatSync(absolute);
+      if (metadata.isSymbolicLink()) {
+        throw new Error("file count 目標不可含 symlink");
+      }
+      if (metadata.isDirectory()) {
+        visit(absolute);
+      } else if (metadata.isFile()) {
+        count += 1;
+      } else {
+        throw new Error("file count 目標只可含 regular file");
+      }
+    }
+  };
+  visit(root);
+  return count;
+}
+
+/** Reads regular files from one immutable commit subtree. */
+export function inspectCandidateCommitTree(
+  repository,
+  commit,
+  treePath,
+) {
+  const safeCommit = validateCommit(commit, "candidate commit");
+  const arguments_ = [
+    "ls-tree",
+    "-r",
+    "-z",
+    "--full-tree",
+    safeCommit,
+  ];
+  if (treePath !== ".") {
+    arguments_.push("--", treePath);
+  }
+  const output = runGit(repository, arguments_, {
+    binary: true,
+    readOnly: true,
+    label: "Git candidate commit tree",
+  });
+  const prefix = treePath === "." ? "" : `${treePath}/`;
+  const files = [];
+  let start = 0;
+  for (let index = 0; index <= output.length; index += 1) {
+    if (index !== output.length && output[index] !== 0) {
+      continue;
+    }
+    if (index === start) {
+      start = index + 1;
+      continue;
+    }
+    const entry = output.subarray(start, index);
+    start = index + 1;
+    const separator = entry.indexOf(9);
+    if (separator <= 0) {
+      throw new Error("candidate commit tree entry 不合法");
+    }
+    const metadata = entry
+      .subarray(0, separator)
+      .toString("ascii")
+      .split(" ");
+    if (metadata.length !== 3) {
+      throw new Error("candidate commit tree metadata 不合法");
+    }
+    const [mode, type, objectId] = metadata;
+    let fullPath;
+    try {
+      fullPath = UTF8_DECODER.decode(entry.subarray(separator + 1));
+    } catch (error) {
+      throw new Error("candidate commit tree 路徑不是 UTF-8", {
+        cause: error,
+      });
+    }
+    if (
+      (prefix !== "" && !fullPath.startsWith(prefix)) ||
+      type !== "blob" ||
+      !["100644", "100755"].includes(mode) ||
+      !COMMIT_PATTERN.test(objectId)
+    ) {
+      throw new Error(
+        `candidate commit tree 含非 regular file：${fullPath}`,
+      );
+    }
+    const relativePath =
+      prefix === "" ? fullPath : fullPath.slice(prefix.length);
+    if (
+      relativePath.length === 0 ||
+      relativePath.split("/").some(
+        (part) =>
+          part.length === 0 ||
+          part === "." ||
+          part === "..",
+      )
+    ) {
+      throw new Error("candidate commit tree 路徑不合法");
+    }
+    if (
+      relativePath.split("/").some(
+        (part) => IGNORED_FINGERPRINT_PARTS.has(part),
+      )
+    ) {
+      continue;
+    }
+    const content = runGit(
+      repository,
+      ["cat-file", "blob", objectId],
+      {
+        binary: true,
+        readOnly: true,
+        label: "Git candidate commit blob",
+      },
+    );
+    files.push({
+      mode,
+      path: relativePath,
+      sha256: createHash("sha256").update(content).digest("hex"),
+    });
+  }
+  files.sort((first, second) => compareUtf8(first.path, second.path));
+  return {
+    fingerprint: fingerprintTreeEntries(files),
+    file_count: files.length,
+    file_sha256: Object.fromEntries(
+      files.map((file) => [file.path, file.sha256]),
+    ),
+    file_modes: Object.fromEntries(
+      files.map((file) => [file.path, file.mode]),
+    ),
+  };
+}
+
+/** Reads and validates one Skill name from repository-relative frontmatter. */
+export function readCandidateSkillName(candidateRoot, skillPath) {
+  const content = readCandidateRegularFile(
+    resolveCandidatePath(candidateRoot, skillPath),
+    "SKILL.md",
+  ).toString("utf8");
+  const frontmatter = content.match(
+    /^---\r?\n(?<body>[\s\S]*?)\r?\n---(?:\r?\n|$)/u,
+  );
+  const names = [
+    ...(frontmatter?.groups?.body ?? "").matchAll(
+      /^name:\s*(?<name>[^\r\n#]+?)\s*$/gmu,
+    ),
+  ].map((match) => match.groups.name.trim());
+  if (
+    names.length !== 1 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(names[0])
+  ) {
+    throw new Error(
+      "candidate SKILL.md 必須有唯一且合法的 frontmatter name",
+    );
+  }
+  return names[0];
+}
+
+/** Reads one exact regular file from an immutable candidate commit. */
+export function readCandidateCommitRegularFile(
+  repository,
+  commit,
+  relativePath,
+) {
+  const safeCommit = validateCommit(commit, "candidate commit");
+  const output = runGit(
+    repository,
+    [
+      "ls-tree",
+      "-z",
+      "--full-tree",
+      safeCommit,
+      "--",
+      relativePath,
+    ],
+    {
+      binary: true,
+      readOnly: true,
+      label: "Git candidate commit file",
+    },
+  );
+  if (
+    output.length < 2 ||
+    output[output.length - 1] !== 0 ||
+    output.subarray(0, output.length - 1).includes(0)
+  ) {
+    throw new Error(
+      `candidate commit 缺少 exact regular file：${relativePath}`,
+    );
+  }
+  const entry = output.subarray(0, output.length - 1);
+  const separator = entry.indexOf(9);
+  const metadata = entry
+    .subarray(0, separator)
+    .toString("ascii")
+    .split(" ");
+  let fullPath;
+  try {
+    fullPath = UTF8_DECODER.decode(entry.subarray(separator + 1));
+  } catch (error) {
+    throw new Error("candidate commit file 路徑不是 UTF-8", {
+      cause: error,
+    });
+  }
+  if (
+    separator <= 0 ||
+    metadata.length !== 3 ||
+    !["100644", "100755"].includes(metadata[0]) ||
+    metadata[1] !== "blob" ||
+    !COMMIT_PATTERN.test(metadata[2]) ||
+    fullPath !== relativePath
+  ) {
+    throw new Error(
+      `candidate commit file 不是 regular file：${relativePath}`,
+    );
+  }
+  return runGit(
+    repository,
+    ["cat-file", "blob", metadata[2]],
+    {
+      binary: true,
+      readOnly: true,
+      label: "Git candidate commit file",
+    },
+  );
+}
+
+/** Reads one in-tree regular file without following symlinks. */
+export function readCandidateRegularFile(root, relativePath) {
+  const candidateRoot = realpathSync(resolve(root));
+  const target = resolve(candidateRoot, relativePath);
+  if (resolveCandidatePath(candidateRoot, relativePath) !== target) {
+    throw new Error(`candidate file 路徑包含 symlink：${relativePath}`);
+  }
+  const rel = relative(candidateRoot, target);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`)) {
+    throw new Error(`candidate file 路徑不合法：${relativePath}`);
+  }
+  let cursor = candidateRoot;
+  for (const part of rel.split(sep)) {
+    cursor = join(cursor, part);
+    if (lstatSync(cursor).isSymbolicLink()) {
+      throw new Error(`candidate file 路徑包含 symlink：${relativePath}`);
+    }
+  }
+  const before = lstatSync(target);
+  if (!before.isFile()) {
+    throw new Error(`candidate file 必須是 regular file：${relativePath}`);
+  }
+  const descriptor = openSync(
+    target,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const opened = fstatSync(descriptor);
+    if (
+      !opened.isFile() ||
+      opened.dev !== before.dev ||
+      opened.ino !== before.ino
+    ) {
+      throw new Error(`candidate file 開啟時已漂移：${relativePath}`);
+    }
+    const content = readFileSync(descriptor);
+    const after = fstatSync(descriptor);
+    const current = lstatSync(target);
+    if (
+      after.dev !== opened.dev ||
+      after.ino !== opened.ino ||
+      after.size !== opened.size ||
+      after.mtimeMs !== opened.mtimeMs ||
+      current.dev !== opened.dev ||
+      current.ino !== opened.ino ||
+      current.size !== opened.size ||
+      current.mtimeMs !== opened.mtimeMs
+    ) {
+      throw new Error(`candidate file 讀取期間已漂移：${relativePath}`);
+    }
+    return content;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 /** Returns true when canonical paths are equal or nested. */
@@ -749,6 +1084,10 @@ export function buildCandidateSnapshot({
   candidatePath,
   installedPath,
   sourcePath,
+  skillPath,
+  targetSkill,
+  targetSkillPath,
+  evaluationFixturePath,
   baseRef,
   approvedOptIds,
   fileOptMap,
@@ -771,6 +1110,67 @@ export function buildCandidateSnapshot({
     candidate,
     repositorySnapshot,
   );
+  if (typeof skillPath !== "string" || skillPath.trim().length === 0) {
+    throw new Error("candidate Skill 路徑不可為空");
+  }
+  const candidateSkill = resolveCandidatePath(candidate, skillPath);
+  if (
+    !existsSync(candidateSkill) ||
+    !statSync(candidateSkill).isDirectory() ||
+    !existsSync(join(candidateSkill, "SKILL.md")) ||
+    !statSync(join(candidateSkill, "SKILL.md")).isFile()
+  ) {
+    throw new Error("candidate Skill 路徑必須是含 SKILL.md 的目錄");
+  }
+  const normalizedSkillPath =
+    relative(candidate, candidateSkill).split(sep).join("/") || ".";
+  if (
+    typeof targetSkillPath !== "string" ||
+    targetSkillPath !== normalizedSkillPath
+  ) {
+    throw new Error("candidate Skill 路徑與已確認 target 不一致");
+  }
+  const skillName = readCandidateSkillName(
+    candidate,
+    normalizedSkillPath,
+  );
+  if (
+    typeof targetSkill !== "string" ||
+    targetSkill !== skillName
+  ) {
+    throw new Error("candidate SKILL.md name 與已確認 target 不一致");
+  }
+  let evaluationFixture = {};
+  if (evaluationFixturePath !== undefined) {
+    const fixtureContent = readCandidateRegularFile(
+      candidate,
+      evaluationFixturePath,
+    );
+    const normalizedFixturePath = relative(
+      candidate,
+      resolveCandidatePath(candidate, evaluationFixturePath),
+    ).split(sep).join("/");
+    try {
+      const parsed = JSON.parse(fixtureContent.toString("utf8"));
+      if (
+        parsed === null ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed)
+      ) {
+        throw new Error("fixture 必須是 JSON object");
+      }
+    } catch (error) {
+      throw new Error("evaluation fixture 必須是有效 JSON object", {
+        cause: error,
+      });
+    }
+    evaluationFixture = {
+      evaluation_fixture_path: normalizedFixturePath,
+      evaluation_fixture_sha256: createHash("sha256")
+        .update(fixtureContent)
+        .digest("hex"),
+    };
+  }
   const sortedFiles = candidateState.changedFiles;
   validateCandidateProcessArtifacts(sortedFiles, {
     excludedPrefixes: processArtifactPrefixes,
@@ -780,6 +1180,10 @@ export function buildCandidateSnapshot({
     schema_version: 1,
     repository_snapshot: repositorySnapshot,
     candidate_diff_hash: candidateState.candidateDiffHash,
+    skill_path: normalizedSkillPath,
+    skill_name: skillName,
+    candidate_skill_fingerprint: fingerprintTree(candidateSkill),
+    ...evaluationFixture,
     changed_files: sortedFiles,
     approved_opt_ids: approved,
     process_artifact_prefixes: clone(processArtifactPrefixes),
@@ -917,6 +1321,87 @@ export function validateBranchPushCandidate(
       canonicalJson(candidateContract.changed_files)
   ) {
     throw new Error("candidate Diff 已漂移");
+  }
+  if (
+    candidateContract.skill_path === undefined ||
+    candidateContract.skill_name === undefined ||
+    candidateContract.candidate_skill_fingerprint === undefined
+  ) {
+    throw new Error(
+      "branch push candidate 缺少 Skill fingerprint 綁定",
+    );
+  }
+  const candidateSkill = resolveCandidatePath(
+    candidate,
+    candidateContract.skill_path,
+  );
+  if (
+    !existsSync(candidateSkill) ||
+    !statSync(candidateSkill).isDirectory() ||
+    fingerprintTree(candidateSkill) !==
+      candidateContract.candidate_skill_fingerprint ||
+    readCandidateSkillName(candidate, candidateContract.skill_path) !==
+      candidateContract.skill_name
+  ) {
+    throw new Error("candidate Skill fingerprint 已漂移");
+  }
+  const committedSkill = inspectCandidateCommitTree(
+    candidate,
+    headCommit,
+    candidateContract.skill_path,
+  );
+  if (
+    committedSkill.fingerprint !==
+      candidateContract.candidate_skill_fingerprint ||
+    committedSkill.file_count !== countTreeFiles(candidateSkill)
+  ) {
+    throw new Error(
+      "candidate HEAD Skill fingerprint 與 snapshot 不一致",
+    );
+  }
+  if (
+    candidateContract.evaluation_fixture_path === undefined ||
+    candidateContract.evaluation_fixture_sha256 === undefined
+  ) {
+    throw new Error("branch push candidate 缺少 fixture 綁定");
+  }
+  const committedFixture = readCandidateCommitRegularFile(
+    candidate,
+    headCommit,
+    candidateContract.evaluation_fixture_path,
+  );
+  if (
+    createHash("sha256").update(committedFixture).digest("hex") !==
+    candidateContract.evaluation_fixture_sha256
+  ) {
+    throw new Error(
+      "candidate HEAD fixture SHA-256 與 snapshot 不一致",
+    );
+  }
+  let fixtureDocument;
+  try {
+    fixtureDocument = JSON.parse(committedFixture.toString("utf8"));
+  } catch (error) {
+    throw new Error("candidate HEAD fixture 不是有效 JSON", {
+      cause: error,
+    });
+  }
+  const targetPaths = fixtureDocument?.target_files?.paths;
+  const targetHashes =
+    fixtureDocument?.target_files?.candidate_sha256;
+  if (
+    !Array.isArray(targetPaths) ||
+    targetPaths.length === 0 ||
+    fixtureDocument?.runtime_bundle?.candidate_file_count !==
+      committedSkill.file_count ||
+    targetPaths.some(
+      (path) =>
+        committedSkill.file_sha256[path] !== targetHashes?.[path],
+    )
+  ) {
+    throw new Error(
+      "candidate HEAD Skill target hashes 與 fixture 不一致",
+    );
   }
   return {
     candidate_path: candidate,

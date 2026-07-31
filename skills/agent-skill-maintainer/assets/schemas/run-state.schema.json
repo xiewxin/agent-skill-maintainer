@@ -114,6 +114,10 @@
         "legacy_merge_verification_fingerprint": {
           "type": "string",
           "pattern": "[a-f0-9]{64}"
+        },
+        "legacy_candidate_identity_fingerprint": {
+          "type": "string",
+          "pattern": "[a-f0-9]{64}"
         }
       }
     }

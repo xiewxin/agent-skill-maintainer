@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0011](0011-exact-private-evaluation-binding.md).
 
 ## Context
 

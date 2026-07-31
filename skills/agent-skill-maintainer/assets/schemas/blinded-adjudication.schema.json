@@ -30,6 +30,7 @@
         "method",
         "committed_at",
         "seed_commitment_sha256",
+        "evaluation_input_sha256",
         "baseline_label",
         "candidate_label"
       ],
@@ -37,6 +38,7 @@
         "method": {"type": "string", "const": "randomized-a-b"},
         "committed_at": {"type": "string", "format": "date-time"},
         "seed_commitment_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "evaluation_input_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
         "baseline_label": {"type": "string", "enum": ["a", "b"]},
         "candidate_label": {"type": "string", "enum": ["a", "b"]}
       }
@@ -54,6 +56,12 @@
           "required": [
             "model_id",
             "session_sha256",
+            "evaluation_input_sha256",
+            "input_view_sha256",
+            "input_bundle_sha256",
+            "transcript_sha256",
+            "tool_calls",
+            "tool_sequence_sha256",
             "started_at",
             "completed_at",
             "output_sha256"
@@ -61,6 +69,12 @@
           "properties": {
             "model_id": {"type": "string", "minLength": 1},
             "session_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+            "evaluation_input_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+            "input_view_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+            "input_bundle_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+            "transcript_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+            "tool_calls": {"type": "integer", "const": 0},
+            "tool_sequence_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
             "started_at": {"type": "string", "format": "date-time"},
             "completed_at": {"type": "string", "format": "date-time"},
             "output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
@@ -153,6 +167,12 @@
         "model_id",
         "session_sha256",
         "tool_profile_sha256",
+        "evaluation_input_sha256",
+        "input_view_sha256",
+        "runtime_bundle_sha256",
+        "transcript_sha256",
+        "tool_calls",
+        "tool_sequence_sha256",
         "started_at",
         "completed_at",
         "output_sha256"
@@ -161,6 +181,12 @@
         "model_id": {"type": "string", "minLength": 1},
         "session_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
         "tool_profile_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "evaluation_input_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "input_view_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "runtime_bundle_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "transcript_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "tool_calls": {"type": "integer", "minimum": 0},
+        "tool_sequence_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
         "started_at": {"type": "string", "format": "date-time"},
         "completed_at": {"type": "string", "format": "date-time"},
         "output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}

@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/forward-evaluation-binding.schema.json",
+  "title": "Candidate-bound Forward Evaluation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_kind",
+    "candidate_skill_fingerprint",
+    "fixture_sha256",
+    "aggregate_fingerprint",
+    "source_manifest",
+    "evaluator_attestation",
+    "private_sources",
+    "fixture",
+    "adjudication",
+    "measurement",
+    "aggregate"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 2},
+    "evidence_kind": {"type": "string", "const": "blinded-forward-evaluation-binding"},
+    "candidate_skill_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "fixture_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "aggregate_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "source_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "builder",
+        "assignment_sha256",
+        "sessions_sha256",
+        "label_a_output_sha256",
+        "label_a_events_sha256",
+        "label_b_output_sha256",
+        "label_b_events_sha256",
+        "judge_output_sha256",
+        "measured_at_sha256",
+        "unblinded_at_sha256",
+        "platform_validation_sha256",
+        "platform_summary_sha256",
+        "evaluator_attestation_sha256"
+      ],
+      "properties": {
+        "builder": {
+          "type": "string",
+          "const": "agent-skill-maintainer/private-forward-binding-v1"
+        },
+        "assignment_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "sessions_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "label_a_output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "label_a_events_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "label_b_output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "label_b_events_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "judge_output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "measured_at_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "unblinded_at_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "platform_validation_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "platform_summary_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "evaluator_attestation_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    },
+    "evaluator_attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "authority_id",
+        "authority_version",
+        "controller_sha256",
+        "payload_sha256",
+        "signature_base64"
+      ],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "authority_id": {"type": "string", "minLength": 1},
+        "authority_version": {"type": "string", "minLength": 1},
+        "controller_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "payload_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "signature_base64": {"type": "string", "minLength": 1}
+      }
+    },
+    "private_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment",
+        "sessions",
+        "label_a_output",
+        "label_a_events",
+        "label_b_output",
+        "label_b_events",
+        "judge_output",
+        "measured_at",
+        "unblinded_at",
+        "platform_validation_evidence"
+      ],
+      "properties": {
+        "assignment": {"type": "object"},
+        "sessions": {"type": "object"},
+        "label_a_output": {"type": "string", "minLength": 1},
+        "label_a_events": {"type": "string", "minLength": 1},
+        "label_b_output": {"type": "string", "minLength": 1},
+        "label_b_events": {"type": "string", "minLength": 1},
+        "judge_output": {"type": "object"},
+        "measured_at": {"type": "string", "format": "date-time"},
+        "unblinded_at": {"type": "string", "format": "date-time"},
+        "platform_validation_evidence": {"type": "object"}
+      }
+    },
+    "fixture": {"type": "object"},
+    "adjudication": {"type": "object"},
+    "measurement": {"type": "object"},
+    "aggregate": {"type": "object"}
+  }
+}

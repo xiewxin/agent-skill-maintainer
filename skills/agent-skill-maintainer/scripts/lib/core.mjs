@@ -31,6 +31,7 @@ export const SCHEMA_NAMES = Object.freeze([
   "provider-selection",
   "repository-snapshot",
   "candidate-snapshot",
+  "forward-evaluation-binding",
   "fork-proof",
   "fork-forward-aggregate",
   "branch-push-proof",
@@ -51,6 +52,8 @@ export const SCHEMA_NAMES = Object.freeze([
   "blinded-forward-aggregate",
   "blinded-adjudication",
   "blinded-measurement",
+  "platform-validation",
+  "platform-validation-evidence",
   "cleanup-preview",
   "cleanup-approval",
   "cleanup-transaction",
@@ -152,6 +155,8 @@ const TOKEN_PATTERNS = [
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const UNIX_PATH_PATTERN = /(^|[^\w])\/(?:Users|home|var|private|opt)\/[^\s]+/g;
 const WINDOWS_PATH_PATTERN = /\b[A-Za-z]:\\[^\s]+/g;
+const DATE_TIME_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?([Zz]|([+-])(\d{2}):(\d{2}))$/u;
 
 export class ApprovalDriftError extends Error {
   /** Indicates that approval no longer matches the active candidate state. */
@@ -189,9 +194,94 @@ export function canonicalJson(value) {
   return JSON.stringify(canonicalize(value));
 }
 
+/** Orders path text by its raw UTF-8 bytes without locale-dependent rules. */
+export function compareUtf8(first, second) {
+  return Buffer.compare(
+    Buffer.from(first, "utf8"),
+    Buffer.from(second, "utf8"),
+  );
+}
+
 /** Produces a stable SHA-256 fingerprint for a JSON-compatible value. */
 export function fingerprint(value) {
   return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+}
+
+/** Returns whether one timestamp has valid RFC 3339 calendar semantics. */
+function isValidDateTime(value) {
+  const match = DATE_TIME_PATTERN.exec(value);
+  if (match === null) {
+    return false;
+  }
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    ,
+    offsetSign,
+    offsetHourText,
+    offsetMinuteText,
+  ] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = Number(offsetHourText ?? 0);
+  const offsetMinute = Number(offsetMinuteText ?? 0);
+  const leapYear =
+    year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth[month - 1] ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 60 ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  ) {
+    return false;
+  }
+  if (second < 60) {
+    return true;
+  }
+  const local = new Date(0);
+  local.setUTCFullYear(year, month - 1, day);
+  local.setUTCHours(hour, minute, 59, 0);
+  const direction = offsetSign === "+" ? 1 : offsetSign === "-" ? -1 : 0;
+  const utc = new Date(
+    local.getTime() -
+      direction * (offsetHour * 60 + offsetMinute) * 60_000,
+  );
+  return (
+    utc.getUTCHours() === 23 &&
+    utc.getUTCMinutes() === 59 &&
+    (
+      (utc.getUTCMonth() === 5 && utc.getUTCDate() === 30) ||
+      (utc.getUTCMonth() === 11 && utc.getUTCDate() === 31)
+    )
+  );
 }
 
 /** Loads a known public JSON Schema. */
@@ -212,9 +302,63 @@ export function loadSchema(schemaName) {
   return document;
 }
 
+/** Resolves one local JSON Pointer reference from the active root schema. */
+function resolveSchemaReference(reference, rootSchema) {
+  if (
+    typeof reference !== "string" ||
+    !reference.startsWith("#/") ||
+    /~(?![01])/u.test(reference)
+  ) {
+    throw new Error(`不支援的 schema $ref：${reference}`);
+  }
+  const segments = reference
+    .slice(2)
+    .split("/")
+    .map((segment) =>
+      segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let target = rootSchema;
+  for (const segment of segments) {
+    if (!isObject(target) || !Object.hasOwn(target, segment)) {
+      throw new Error(`schema $ref 不存在：${reference}`);
+    }
+    target = target[segment];
+  }
+  if (!isObject(target)) {
+    throw new Error(`schema $ref 目標不合法：${reference}`);
+  }
+  return target;
+}
+
 /** Validates the project-supported JSON Schema subset. */
-function validateValue(value, rule, path) {
-  const expectedType = rule.type;
+function validateValue(
+  value,
+  rule,
+  path,
+  rootSchema,
+  referenceStack = new Set(),
+) {
+  let activeRule = rule;
+  if (Object.hasOwn(activeRule, "$ref")) {
+    const reference = activeRule.$ref;
+    if (referenceStack.has(reference)) {
+      throw new Error(`schema $ref 循環：${reference}`);
+    }
+    validateValue(
+      value,
+      resolveSchemaReference(reference, rootSchema),
+      path,
+      rootSchema,
+      new Set([...referenceStack, reference]),
+    );
+    activeRule = Object.fromEntries(
+      Object.entries(activeRule)
+        .filter(([name]) => name !== "$ref"),
+    );
+    if (Object.keys(activeRule).length === 0) {
+      return;
+    }
+  }
+  const expectedType = activeRule.type;
   const typeMatches = {
     array: Array.isArray(value),
     boolean: typeof value === "boolean",
@@ -236,35 +380,90 @@ function validateValue(value, rule, path) {
   ) {
     throw new Error(`${path} 類型不合法`);
   }
-  if (Object.hasOwn(rule, "const") && value !== rule.const) {
-    throw new Error(`${path} 必須等於 ${JSON.stringify(rule.const)}`);
+  if (Object.hasOwn(activeRule, "const") && value !== activeRule.const) {
+    throw new Error(`${path} 必須等於 ${JSON.stringify(activeRule.const)}`);
   }
-  if (Array.isArray(rule.enum) && !rule.enum.includes(value)) {
+  if (
+    Array.isArray(activeRule.enum) &&
+    !activeRule.enum.includes(value)
+  ) {
     throw new Error(`${path} 不在允許值內`);
   }
   if (typeof value === "string") {
-    if (value.length < (rule.minLength ?? 0)) {
+    if (value.length < (activeRule.minLength ?? 0)) {
       throw new Error(`${path} 不可為空`);
     }
     if (
-      typeof rule.pattern === "string" &&
-      !new RegExp(`^(?:${rule.pattern})$`, "u").test(value)
+      typeof activeRule.pattern === "string" &&
+      !new RegExp(`^(?:${activeRule.pattern})$`, "u").test(value)
     ) {
       throw new Error(`${path} 格式不合法`);
     }
+    if (
+      activeRule.format === "date-time" &&
+      !isValidDateTime(value)
+    ) {
+      throw new Error(`${path} 必須是 RFC 3339 date-time`);
+    }
   }
-  if (Array.isArray(value) && isObject(rule.items)) {
+  if (
+    typeof value === "number" &&
+    Number.isFinite(activeRule.minimum) &&
+    value < activeRule.minimum
+  ) {
+    throw new Error(`${path} 不可小於 ${activeRule.minimum}`);
+  }
+  if (Array.isArray(value)) {
+    if (
+      Number.isInteger(activeRule.minItems) &&
+      value.length < activeRule.minItems
+    ) {
+      throw new Error(`${path} 至少需要 ${activeRule.minItems} 項`);
+    }
+    if (
+      Number.isInteger(activeRule.maxItems) &&
+      value.length > activeRule.maxItems
+    ) {
+      throw new Error(`${path} 最多允許 ${activeRule.maxItems} 項`);
+    }
+    if (
+      activeRule.uniqueItems === true &&
+      new Set(value.map((item) => canonicalJson(item))).size !==
+        value.length
+    ) {
+      throw new Error(`${path} 項目不可重複`);
+    }
+  }
+  if (Array.isArray(value) && isObject(activeRule.items)) {
     value.forEach((item, index) => {
-      validateValue(item, rule.items, `${path}[${index}]`);
+      validateValue(
+        item,
+        activeRule.items,
+        `${path}[${index}]`,
+        rootSchema,
+        referenceStack,
+      );
     });
   }
   if (isObject(value)) {
-    validateObject(value, rule, path);
+    validateObject(
+      value,
+      activeRule,
+      path,
+      rootSchema,
+      referenceStack,
+    );
   }
 }
 
 /** Validates object fields against the supported schema subset. */
-function validateObject(document, schema, path) {
+function validateObject(
+  document,
+  schema,
+  path,
+  rootSchema,
+  referenceStack,
+) {
   const required = schema.required ?? [];
   const missing = required.filter((name) => !Object.hasOwn(document, name));
   if (missing.length > 0) {
@@ -282,7 +481,13 @@ function validateObject(document, schema, path) {
   for (const [name, value] of Object.entries(document)) {
     const rule = properties[name];
     if (isObject(rule)) {
-      validateValue(value, rule, `${path}.${name}`);
+      validateValue(
+        value,
+        rule,
+        `${path}.${name}`,
+        rootSchema,
+        referenceStack,
+      );
     }
   }
 }
@@ -292,7 +497,8 @@ export function validateDocument(schemaName, document) {
   if (!isObject(document)) {
     throw new Error("文件必須是 JSON object");
   }
-  validateValue(document, loadSchema(schemaName), schemaName);
+  const schema = loadSchema(schemaName);
+  validateValue(document, schema, schemaName, schema);
   return true;
 }
 
@@ -1498,6 +1704,68 @@ export function validateCandidateSnapshotContract(candidateSnapshot) {
   const candidate = clone(candidateSnapshot);
   validateDocument("candidate-snapshot", candidate);
   validateDocument("repository-snapshot", candidate.repository_snapshot);
+  const hasSkillPath = Object.hasOwn(candidate, "skill_path");
+  const hasSkillName = Object.hasOwn(candidate, "skill_name");
+  const hasSkillFingerprint = Object.hasOwn(
+    candidate,
+    "candidate_skill_fingerprint",
+  );
+  const hasFixturePath = Object.hasOwn(
+    candidate,
+    "evaluation_fixture_path",
+  );
+  const hasFixtureHash = Object.hasOwn(
+    candidate,
+    "evaluation_fixture_sha256",
+  );
+  if (
+    hasSkillPath !== hasSkillName ||
+    hasSkillPath !== hasSkillFingerprint
+  ) {
+    throw new Error(
+      "candidate Skill 路徑、名稱與 fingerprint 必須同時存在",
+    );
+  }
+  if (hasFixturePath !== hasFixtureHash) {
+    throw new Error(
+      "evaluation fixture 路徑與 SHA-256 必須同時存在",
+    );
+  }
+  if (
+    hasSkillPath &&
+    (
+      candidate.skill_path.trim() !== candidate.skill_path ||
+      isAbsolute(candidate.skill_path) ||
+      candidate.skill_path.includes("\\") ||
+      candidate.skill_path.split("/").some(
+        (part) =>
+          part.length === 0 ||
+          part === ".." ||
+          (part === "." && candidate.skill_path !== "."),
+      )
+    )
+  ) {
+    throw new Error("candidate Skill 路徑必須是規範化的倉庫相對路徑");
+  }
+  if (
+    hasFixturePath &&
+    (
+      candidate.evaluation_fixture_path.trim() !==
+        candidate.evaluation_fixture_path ||
+      isAbsolute(candidate.evaluation_fixture_path) ||
+      candidate.evaluation_fixture_path.includes("\\") ||
+      candidate.evaluation_fixture_path.split("/").some(
+        (part) =>
+          part.length === 0 ||
+          part === "." ||
+          part === "..",
+      )
+    )
+  ) {
+    throw new Error(
+      "evaluation fixture 路徑必須是規範化的倉庫相對路徑",
+    );
+  }
   if (
     canonicalJson(candidate.process_artifact_prefixes) !==
     canonicalJson(candidate.repository_snapshot.process_artifact_prefixes)
@@ -1653,48 +1921,6 @@ export function validateForkProofContract(
     throw new Error("Fork proof 與目前帳號、上游或基準提交不一致");
   }
   return proof;
-}
-
-/** Rebuilds a PR-ready validation result and requires all forward categories. */
-export function validatePrReadyValidation(
-  validationSummary,
-  candidateSnapshot,
-) {
-  const candidate = validateCandidateSnapshotContract(candidateSnapshot);
-  const summary = clone(validationSummary);
-  validateDocument("validation", summary);
-  if (
-    summary.candidate_diff_hash !== candidate.candidate_diff_hash ||
-    summary.passed !== true ||
-    summary.blockers.length !== 0
-  ) {
-    throw new Error("候選驗證摘要與目前 Diff 不一致或尚未通過");
-  }
-  const checkIds = new Set(summary.checks.map((check) => check?.id));
-  const rebuilt = buildValidationResult(candidate, {
-    checks: summary.checks,
-    requiredCheckIds: checkIds,
-  });
-  if (canonicalJson(rebuilt) !== canonicalJson(summary)) {
-    throw new Error("候選驗證摘要無法由目前 checks 重建");
-  }
-  const categories = new Set(summary.checks.map((check) => check.category));
-  const missingCategories = [
-    "safety",
-    "regression",
-    "forward",
-    "quality",
-    "documentation",
-  ].filter((category) => !categories.has(category));
-  if (missingCategories.length > 0) {
-    throw new Error(
-      `候選驗證缺少必要類別：${missingCategories.join(", ")}`,
-    );
-  }
-  if (summary.checks.some((check) => check.status !== "passed")) {
-    throw new Error("PR 前所有候選檢查都必須通過");
-  }
-  return summary;
 }
 
 /** Validates PR proof and binds its guidance impact to candidate validation. */

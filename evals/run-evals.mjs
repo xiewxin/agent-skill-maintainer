@@ -21,12 +21,23 @@ import {
   validateOptimizationRecords,
   validateProviderValidationAggregate,
 } from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
-import { fingerprintTree } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
+import {
+  countTreeFiles,
+  fingerprintTree,
+  readCandidateRegularFile,
+} from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 import {
   buildBlindedAdjudication,
   buildBlindedMeasurement,
+  buildGeneratorEvaluationInputView,
+  buildJudgeEvaluationInputBundle,
+  buildJudgeEvaluationInputView,
+  buildOpaqueJudgeLabelOutput,
   deriveBlindedForwardAggregate,
+  evaluationInputFingerprint,
   inspectBlindedForwardAggregate,
+  observeRuntimeCliSmoke,
+  rederiveBlindedForwardAggregate,
   validateBlindedAdjudication,
   validateBlindedMeasurement,
   verifyBlindedMeasurementSources,
@@ -44,14 +55,25 @@ const REQUIRED_FORWARD_BEHAVIOR_IDS = Object.freeze([
   "target-intent-preserved",
 ]);
 const REQUIRED_HELDOUT_BEHAVIOR_IDS = Object.freeze([
-  "active-aborted-and-ambiguous-resources-block",
-  "candidate-does-not-self-approve",
-  "cleanup-attempt-precedes-quarantine-delete",
-  "cleanup-exact-candidate-only",
-  "cleanup-reconcile-does-not-replay",
-  "independent-pre-unblind-judge-required",
-  "measurement-and-aggregate-are-derived",
-  "terminal-source-run-remains-byte-stable",
+  "binds-evaluation-sessions-to-input-commitment",
+  "binds-platform-validation-sessions",
+  "binds-publication-to-head-commit-tree",
+  "binds-snapshot-to-locked-fixture",
+  "binds-target-skill-name-and-path",
+  "blocks-rederived-forged-target-hash",
+  "bounds-legacy-to-terminal-release-continuation",
+  "bounds-measurement-before-judging",
+  "continuation-cannot-reenter-merge",
+  "exposes-runtime-eval-bind-contract",
+  "includes-mode-and-node-modules-in-tree-identity",
+  "keeps-binding-analysis-read-only",
+  "keeps-evaluation-input-views-label-neutral",
+  "requires-exact-source-rederivation",
+  "requires-pr-ready-exact-binding",
+  "revalidates-final-skill-before-push-transition",
+  "scans-tracked-node-modules-for-disclosure",
+  "supplies-complete-callable-runtime-bundles",
+  "terminal-transition-cannot-cross-inflight-github-apply",
 ]);
 const REQUIRED_FORK_BEHAVIOR_IDS = Object.freeze([
   "confirmed-create-exactly-one-post",
@@ -110,51 +132,161 @@ export function validateForwardEvaluationFixture(fixture) {
 /** Validates the locked held-out fixture used by publishable same-model A/B. */
 export function validateHeldoutForwardFixture(fixture) {
   const behaviorIds = [...(fixture?.required_behaviors ?? [])].sort();
-  const rubricBehaviorIds = [
-    ...(fixture?.locked_rubric?.required_behaviors ?? []),
-  ]
-    .map((behavior) => behavior.id)
-    .sort();
+  const rubric = fixture?.locked_rubric;
+  const rubricBehaviorIds =
+    rubric !== null &&
+    typeof rubric === "object" &&
+    !Array.isArray(rubric)
+      ? Object.keys(rubric).sort()
+      : [];
   const targetFiles = fixture?.target_files;
+  const targetPaths = targetFiles?.paths;
+  const baselineHashes = targetFiles?.baseline_sha256;
+  const candidateHashes = targetFiles?.candidate_sha256;
   const quality = fixture?.quality_thresholds;
   const cost = fixture?.cost_thresholds;
+  const aggregateTemplate = fixture?.aggregate_template;
+  const runtimeBundle = fixture?.runtime_bundle;
+  const candidateSkillRoot = resolve(
+    ROOT,
+    "skills",
+    "agent-skill-maintainer",
+  );
+  const validTargetHashes = (hashes) =>
+    hashes !== null &&
+    typeof hashes === "object" &&
+    !Array.isArray(hashes) &&
+    JSON.stringify(Object.keys(hashes).sort()) ===
+      JSON.stringify([...targetPaths].sort()) &&
+    Object.values(hashes).every((hash) => /^[a-f0-9]{64}$/u.test(hash));
+  const candidateTargetHashesCurrent = () => {
+    const before = fingerprintTree(candidateSkillRoot);
+    const matched = targetPaths.every((relativePath) => {
+      const content = readCandidateRegularFile(
+        candidateSkillRoot,
+        relativePath,
+      );
+      return (
+        createHash("sha256").update(content).digest("hex") ===
+        candidateHashes[relativePath]
+      );
+    });
+    return (
+      matched &&
+      before === fingerprintTree(candidateSkillRoot) &&
+      countTreeFiles(candidateSkillRoot) ===
+        runtimeBundle?.candidate_file_count &&
+      before ===
+        fixture.usage_evidence.current_run.candidate_skill_fingerprint
+    );
+  };
   return (
     fixture?.schema_version === 1 &&
-    fixture?.id === "synthetic/candidate-cleanup-scoring-heldout" &&
+    /^agent-skill-maintainer-eval-binding-heldout-v[0-9]+$/u
+      .test(fixture?.id ?? "") &&
     Number.isFinite(Date.parse(fixture?.locked_at)) &&
     targetFiles !== null &&
     typeof targetFiles === "object" &&
     !Array.isArray(targetFiles) &&
-    Object.keys(targetFiles).length === 3 &&
-    Object.values(targetFiles).every(
-      (content) => typeof content === "string" && content.length > 0,
+    Array.isArray(targetPaths) &&
+    targetPaths.length >= 15 &&
+    targetPaths.every(
+      (relativePath) =>
+        typeof relativePath === "string" &&
+        relativePath.length > 0 &&
+        !relativePath.startsWith("/") &&
+        !/^[A-Za-z]:/u.test(relativePath) &&
+        !relativePath.includes("\\") &&
+        !relativePath.split("/").some(
+          (part) => part.length === 0 || part === "." || part === "..",
+        ),
     ) &&
+    validTargetHashes(baselineHashes) &&
+    validTargetHashes(candidateHashes) &&
+    candidateTargetHashesCurrent() &&
     typeof fixture?.prompt === "string" &&
-    fixture.prompt.includes("`candidate-lifecycle`") &&
-    Array.isArray(fixture?.usage_evidence) &&
-    fixture.usage_evidence.length === 4 &&
+    fixture.prompt.includes("opaque Skill variant") &&
+    !fixture.prompt.includes(
+      fixture.usage_evidence.current_run.candidate_skill_fingerprint,
+    ) &&
+    !fixture.prompt.includes(
+      runtimeBundle.baseline_tree_fingerprint,
+    ) &&
+    fixture?.usage_evidence !== null &&
+    typeof fixture.usage_evidence === "object" &&
+    !Array.isArray(fixture.usage_evidence) &&
     JSON.stringify(behaviorIds) ===
       JSON.stringify(REQUIRED_HELDOUT_BEHAVIOR_IDS) &&
-    fixture?.locked_rubric?.schema_version === 1 &&
-    fixture?.locked_rubric?.fixture_id === fixture.id &&
-    fixture?.locked_rubric?.locked_before_outputs === true &&
     JSON.stringify(rubricBehaviorIds) ===
       JSON.stringify(REQUIRED_HELDOUT_BEHAVIOR_IDS) &&
-    JSON.stringify(fixture.locked_rubric.quality_thresholds) ===
-      JSON.stringify(quality) &&
-    JSON.stringify(fixture.locked_rubric.cost_thresholds) ===
-      JSON.stringify(cost) &&
-    quality?.candidate_required_behaviors === 8 &&
+    Object.values(rubric).every(
+      (behavior) =>
+        typeof behavior?.pass === "string" &&
+        behavior.pass.length > 0 &&
+        typeof behavior?.fail === "string" &&
+        behavior.fail.length > 0 &&
+        typeof behavior?.insufficient_evidence === "string" &&
+        behavior.insufficient_evidence.length > 0,
+    ) &&
     quality?.candidate_regressions === 0 &&
     quality?.false_positive_optimizations === 0 &&
     quality?.candidate_minimum_gain_over_baseline === 1 &&
     quality?.max_candidate_heading_count === 8 &&
-    cost?.candidate_artifact_bytes_max_ratio_to_baseline === 1.5 &&
-    cost?.candidate_tool_calls_max === 6 &&
+    cost?.candidate_artifact_bytes_max_ratio_to_baseline === 1.75 &&
+    cost?.candidate_tool_calls_max === 45 &&
+    aggregateTemplate !== null &&
+    typeof aggregateTemplate === "object" &&
+    !Array.isArray(aggregateTemplate) &&
+    aggregateTemplate.platform_requirements?.installer === "skills" &&
+    aggregateTemplate.platform_requirements?.scope ===
+      "isolated-project-copy" &&
+    JSON.stringify(
+      [...(aggregateTemplate.platform_requirements?.platforms ?? [])]
+        .sort(),
+    ) === JSON.stringify(["claude-code", "codex"]) &&
+    Array.isArray(aggregateTemplate.limits) &&
+    aggregateTemplate.limits.length > 0 &&
+    runtimeBundle?.mode === "complete-skill-tree" &&
+    runtimeBundle?.skill_root === "." &&
+    /^[a-f0-9]{64}$/u.test(
+      runtimeBundle?.baseline_tree_fingerprint ?? "",
+    ) &&
+    runtimeBundle?.candidate_tree_fingerprint ===
+      fixture.usage_evidence.current_run.candidate_skill_fingerprint &&
+    Number.isInteger(runtimeBundle?.baseline_file_count) &&
+    runtimeBundle.baseline_file_count > 0 &&
+    Number.isInteger(runtimeBundle?.candidate_file_count) &&
+    runtimeBundle.candidate_file_count > 0 &&
+    runtimeBundle?.read_only_cli_smoke === true &&
     fixture?.tool_profile?.mode === "read-only" &&
-    fixture?.tool_profile?.filesystem_write === false &&
-    fixture?.tool_profile?.remote_write === false &&
-    fixture?.raw_outputs_published === false
+    fixture?.tool_profile?.network_access === false &&
+    fixture?.tool_profile?.filesystem_writes === false &&
+    fixture?.evaluator_authority?.authority_id ===
+      "agent-skill-maintainer-neutral-evaluator" &&
+    fixture?.evaluator_authority?.version === "1" &&
+    /^[a-f0-9]{64}$/u.test(
+      fixture?.evaluator_authority?.controller_sha256 ?? "",
+    ) &&
+    fixture?.evaluator_authority?.public_key_pem?.includes(
+      "BEGIN PUBLIC KEY",
+    ) &&
+    fixture?.tool_profile?.remote_writes === false &&
+    JSON.stringify(
+      fixture?.tool_profile?.transcript_policy,
+    ) === JSON.stringify({
+      allowed_item_types: [
+        "command_execution",
+        "todo_list",
+      ],
+      allowed_command_families: [
+        "eval_bind_smoke",
+        "read",
+        "runtime_observation",
+      ],
+      required_eval_bind_smoke_count: 1,
+      required_runtime_observation_count: 1,
+      max_tool_calls: 45,
+    })
   );
 }
 
@@ -166,6 +298,7 @@ function heldoutProtocolFingerprints(fixture) {
     prompt_sha256: sha256(fixture.prompt),
     artifacts_sha256: fingerprint({
       target_files: fixture.target_files,
+      runtime_bundle: fixture.runtime_bundle,
       usage_evidence: fixture.usage_evidence,
     }),
     rubric_sha256: sha256(
@@ -355,7 +488,7 @@ export function validateForwardEvaluationAggregate(
           ROOT,
           "evals",
           "cases",
-          "candidate-cleanup-scoring-heldout.json",
+          "evaluation-binding-heldout.json",
         ),
         "utf8",
       ),
@@ -387,14 +520,12 @@ export function validateForwardEvaluationAggregate(
   validateDocument("blinded-forward-aggregate", aggregate);
   validateBlindedAdjudication(adjudication, fixture);
   validateBlindedMeasurement(measurement, adjudication, fixture);
-  const expected = deriveBlindedForwardAggregate({
+  const expected = rederiveBlindedForwardAggregate({
+    aggregate,
     adjudication,
     measurement,
     fixture,
     currentSkillFingerprint,
-    evaluatedAt: aggregate.evaluated_at,
-    platformValidation: aggregate.platform_validation,
-    limits: aggregate.limits,
   });
   const exactDerivation =
     fingerprint(aggregate) === fingerprint(expected);
@@ -456,8 +587,15 @@ export function validateForwardEvaluationAggregate(
 export {
   buildBlindedAdjudication,
   buildBlindedMeasurement,
+  buildGeneratorEvaluationInputView,
+  buildJudgeEvaluationInputBundle,
+  buildJudgeEvaluationInputView,
+  buildOpaqueJudgeLabelOutput,
   deriveBlindedForwardAggregate,
+  evaluationInputFingerprint,
   inspectBlindedForwardAggregate,
+  observeRuntimeCliSmoke,
+  rederiveBlindedForwardAggregate,
   validateBlindedAdjudication,
   validateBlindedMeasurement,
   verifyBlindedMeasurementSources,
@@ -588,7 +726,7 @@ export function main(argv = process.argv.slice(2)) {
         ROOT,
         "evals",
         "cases",
-        "candidate-cleanup-scoring-heldout.json",
+        "evaluation-binding-heldout.json",
       ),
       "utf8",
     ),

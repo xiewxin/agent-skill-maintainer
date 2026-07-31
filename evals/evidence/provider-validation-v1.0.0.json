@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "evidence_kind": "provider-validation-aggregate",
-  "evaluated_at": "2026-07-29T03:57:36.000Z",
+  "evaluated_at": "2026-07-30T10:35:08.173Z",
   "case_measurements_evaluated_at": "2026-07-28T05:02:21.000Z",
   "case_measurements_reused_without_rerun": true,
-  "candidate_bridge_evaluated_at": "2026-07-29T03:57:36.000Z",
-  "candidate_skill_fingerprint": "8fb4a79b69bcb321b38a4c6c7ee284c2c465ca709ba7a74a4d42795b233bfd2d",
+  "candidate_bridge_evaluated_at": "2026-07-30T10:35:08.173Z",
+  "candidate_skill_fingerprint": "9ce7aadfacdb627c7b423f659ee42232a0a67a5cbea741072ae9b4a037ec897d",
   "raw_outputs_published": false,
   "local_installations_modified": false,
   "cases": [
@@ -17,8 +17,12 @@
       "capability_gap": "verified remaining-work implementation planning",
       "owner": "superpowers-writing-plan",
       "required_access": "commands",
-      "command_ids": ["writing-plans"],
-      "artifact_kinds": ["planning"],
+      "command_ids": [
+        "writing-plans"
+      ],
+      "artifact_kinds": [
+        "planning"
+      ],
       "artifact_fingerprint": "e8712122fa3aca823459db39cdf6dd9c921335f6fb8aeaac84af6157a955acb5",
       "isolated_home": true,
       "isolated_repository": true,
@@ -100,8 +104,15 @@
       "capability_gap": "requirement scenario and change-artifact verification",
       "owner": "openspec-change-workflow",
       "required_access": "commands",
-      "command_ids": ["opsx:propose", "opsx:verify"],
-      "artifact_kinds": ["proposal", "design", "spec-delta"],
+      "command_ids": [
+        "opsx:propose",
+        "opsx:verify"
+      ],
+      "artifact_kinds": [
+        "proposal",
+        "design",
+        "spec-delta"
+      ],
       "artifact_fingerprint": "7aa85f197cb7c0e1c077b56e01f33247809396ca83554b95ba775ee807180499",
       "isolated_home": true,
       "isolated_repository": true,
@@ -138,8 +149,12 @@
       "capability_gap": "stable capability identifiers and correction history",
       "owner": "bmad-spec-workflow",
       "required_access": "commands",
-      "command_ids": ["bmad-spec"],
-      "artifact_kinds": ["quick-flow"],
+      "command_ids": [
+        "bmad-spec"
+      ],
+      "artifact_kinds": [
+        "quick-flow"
+      ],
       "artifact_fingerprint": "eca52b51fd6e10b24f42097dc7b99b2d3240d399448c75e2b7ac8780d0509f86",
       "isolated_home": true,
       "isolated_repository": true,
@@ -176,7 +191,10 @@
       "capability_gap": "current-state specification and vertical ticket decomposition",
       "owner": "matt-pocock-spec-ticket-workflow",
       "required_access": "commands",
-      "command_ids": ["to-spec", "to-tickets"],
+      "command_ids": [
+        "to-spec",
+        "to-tickets"
+      ],
       "artifact_kinds": [
         "specification",
         "vertical-ticket-decomposition"

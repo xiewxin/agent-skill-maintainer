@@ -25,7 +25,13 @@ import {
 } from "../skills/agent-skill-maintainer/scripts/lib/update.mjs";
 import {
   evaluateReleaseNoteCoverage,
+  fingerprintCandidatePath,
+  fingerprintTree,
 } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
+import {
+  createBranchPushFixture,
+  forwardEvaluationBindingFixture,
+} from "./fixtures.mjs";
 import {
   authorizeGithubActionReconcile,
   createPublicationContinuation,
@@ -44,15 +50,13 @@ import {
   runMaintainerCommand,
 } from "../skills/agent-skill-maintainer/scripts/maintainer.mjs";
 
-const REPOSITORY_SNAPSHOT = Object.freeze({
-  schema_version: 1,
-  base_ref: "main",
-  merge_base: "base123",
-  head_commit: "abc123",
-  diff_hash: "a".repeat(64),
-  changed_files: ["SKILL.md"],
-  process_artifact_prefixes: ["docs/plans/", "docs/specs/"],
+const LIVE_CANDIDATE = createBranchPushFixture({
+  prefix: "maintainer-state-live-",
+  branchName: "feature",
 });
+const REPOSITORY_SNAPSHOT = Object.freeze(
+  LIVE_CANDIDATE.repositorySnapshot,
+);
 
 /** Builds an implementation confirmation bound to one run. */
 function implementationApproval(runId = "run-001") {
@@ -74,17 +78,9 @@ function implementationApproval(runId = "run-001") {
   return approval;
 }
 
-const CANDIDATE_SNAPSHOT = Object.freeze({
-  schema_version: 1,
-  repository_snapshot: REPOSITORY_SNAPSHOT,
-  candidate_diff_hash: "f".repeat(64),
-  changed_files: ["SKILL.md"],
-  approved_opt_ids: ["OPT-001"],
-  process_artifact_prefixes: ["docs/plans/", "docs/specs/"],
-  file_opt_map: { "SKILL.md": ["OPT-001"] },
-  diff_mapping_complete: true,
-  isolated: true,
-});
+const CANDIDATE_SNAPSHOT = Object.freeze(
+  LIVE_CANDIDATE.candidateSnapshot,
+);
 
 const DOCUMENTATION_IMPACT = Object.freeze({
   schema_version: 1,
@@ -115,6 +111,10 @@ const VALIDATION_SUMMARY = Object.freeze(
         category: "forward",
         status: "passed",
         summary: "前向合同案例通過。",
+        details: forwardEvaluationBindingFixture(
+          CANDIDATE_SNAPSHOT,
+          LIVE_CANDIDATE.candidate,
+        ),
       },
       {
         id: "quality",
@@ -144,7 +144,7 @@ const PR_PROOF = Object.freeze({
   schema_version: 1,
   repository: "example/skill",
   number: 1,
-  head_commit: REPOSITORY_SNAPSHOT.head_commit,
+  head_commit: CANDIDATE_SNAPSHOT.repository_snapshot.head_commit,
   base_branch: "main",
   state: "open",
   checks_passed: true,
@@ -157,9 +157,9 @@ const BRANCH_PUSH_PROOF = Object.freeze({
   head_repository: "example/skill",
   relationship: "managed",
   base_branch: "main",
-  base_commit: REPOSITORY_SNAPSHOT.merge_base,
+  base_commit: CANDIDATE_SNAPSHOT.repository_snapshot.merge_base,
   branch: "feature",
-  commit: REPOSITORY_SNAPSHOT.head_commit,
+  commit: CANDIDATE_SNAPSHOT.repository_snapshot.head_commit,
   candidate_diff_hash: CANDIDATE_SNAPSHOT.candidate_diff_hash,
   previous_remote_commit: null,
   operation: "create",
@@ -189,7 +189,8 @@ const RELEASE_COVERAGE = Object.freeze(
     {
       schema_version: 1,
       previous_ref: "v0.9.0",
-      previous_commit: "base123",
+      previous_commit:
+        CANDIDATE_SNAPSHOT.repository_snapshot.merge_base,
       candidate_ref: "HEAD",
       candidate_commit: MERGE_COMMIT,
       commits: [
@@ -219,14 +220,18 @@ const RELEASE_COVERAGE = Object.freeze(
 );
 const LOCAL_PROVIDER_HASH = "9".repeat(64);
 
+test.after(() => {
+  rmSync(LIVE_CANDIDATE.root, { recursive: true, force: true });
+});
+
 /** Returns one exact Preview and expiring confirmation for a lifecycle action. */
 function actionEvidence(
   action,
   {
-    headCommit = REPOSITORY_SNAPSHOT.head_commit,
+    headCommit = CANDIDATE_SNAPSHOT.repository_snapshot.head_commit,
     baseCommit = action === "release"
       ? headCommit
-      : REPOSITORY_SNAPSHOT.merge_base,
+      : CANDIDATE_SNAPSHOT.repository_snapshot.merge_base,
     runId = "run-001",
     relationship = action === "fork_create"
       ? "contribute"
@@ -239,7 +244,9 @@ function actionEvidence(
         }
       : action === "branch_push" || action === "publish_pr"
       ? {
-          candidate_path_fingerprint: "d".repeat(64),
+          candidate_path_fingerprint: fingerprintCandidatePath(
+            LIVE_CANDIDATE.candidate,
+          ),
           expected_remote_commit: null,
           head_repository: "example/skill",
           operation: "create",
@@ -373,7 +380,11 @@ test("run state is minimal, versioned, and recoverable", () => {
     const created = createRun(root, {
       runId: "run-001",
       bindingId: "binding-001",
-      target: { skill: "example-skill", repository: "example/skill" },
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
     });
     assert.equal(created.schema_version, 8);
     assert.equal(created.phase, "target_selection");
@@ -414,12 +425,59 @@ test("invalid transitions fail and terminal phases clear approvals", () => {
   });
 });
 
+test("validation rejects a snapshot for a decoy Skill path", () => {
+  withStateRoot((root) => {
+    createRun(root, {
+      runId: "run-001",
+      bindingId: "binding-001",
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
+    });
+    for (const [phase, updates] of [
+      ["evidence_collection", {}],
+      ["feedback_validation", {}],
+      ["optimization_design", {}],
+      ["optimization_approval", {}],
+      [
+        "isolation",
+        {
+          repository_snapshot: REPOSITORY_SNAPSHOT,
+          approvals: [implementationApproval()],
+        },
+      ],
+      ["implementation", {}],
+    ]) {
+      transitionRun(root, "run-001", phase, { updates });
+    }
+    const decoy = structuredClone(CANDIDATE_SNAPSHOT);
+    decoy.skill_path = ".";
+    decoy.skill_name = "decoy-skill";
+    decoy.candidate_skill_fingerprint = fingerprintTree(
+      LIVE_CANDIDATE.candidate,
+    );
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "validation", {
+          updates: { candidate_snapshot: decoy },
+        }),
+      /已確認 target/u,
+    );
+  });
+});
+
 test("full managed lifecycle includes PR update and local update", () => {
   withStateRoot((root) => {
     createRun(root, {
       runId: "run-001",
       bindingId: "binding-001",
-      target: { skill: "example-skill", repository: "example/skill" },
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
     });
     const phases = [
       ["evidence_collection", {}],
@@ -491,7 +549,10 @@ test("full managed lifecycle includes PR update and local update", () => {
     ];
     let document;
     for (const [phase, updates] of phases) {
-      document = transitionRun(root, "run-001", phase, { updates });
+      document = transitionRun(root, "run-001", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
       assert.equal(document.phase, phase);
     }
     const updateEvidence = localUpdateEvidence();
@@ -580,6 +641,7 @@ test("merge completion is explicit and can seed one verified release continuatio
       bindingId: "binding-001",
       target: {
         skill: "example-skill",
+        skill_path: "skill",
         repository: "example/skill",
       },
     });
@@ -626,7 +688,10 @@ test("merge completion is explicit and can seed one verified release continuatio
         },
       ],
     ]) {
-      transitionRun(root, "run-source", phase, { updates });
+      transitionRun(root, "run-source", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
     }
     assert.throws(
       () => transitionRun(root, "run-source", "completed"),
@@ -659,6 +724,44 @@ test("merge completion is explicit and can seed one verified release continuatio
     assert.equal(
       completed.completion_disposition.kind,
       "stop_after_merge",
+    );
+    const sourcePath = join(
+      root,
+      "runs",
+      "run-source",
+      "state.json",
+    );
+    const pendingSource = structuredClone(completed);
+    pendingSource.github_action_attempts.push({
+      action: "merge",
+      approval_fingerprint: "f".repeat(64),
+      attempted_at: "2026-07-28T08:30:00.000Z",
+    });
+    writeFileSync(
+      sourcePath,
+      `${JSON.stringify(pendingSource)}\n`,
+      "utf8",
+    );
+    assert.throws(
+      () =>
+        createPublicationContinuation(root, {
+          sourceRunId: "run-source",
+          runId: "run-release-pending",
+          bindingId: "binding-001",
+          mergeProof,
+        }),
+      /GitHub action.*reconcile/u,
+    );
+    assert.equal(
+      existsSync(
+        join(root, "runs", "run-release-pending", "state.json"),
+      ),
+      false,
+    );
+    writeFileSync(
+      sourcePath,
+      `${JSON.stringify(completed)}\n`,
+      "utf8",
     );
     assert.throws(
       () =>
@@ -696,6 +799,7 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
       bindingId: "binding-001",
       target: {
         skill: "example-skill",
+        skill_path: "skill",
         repository: "example/skill",
       },
     });
@@ -733,7 +837,10 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
         },
       ],
     ]) {
-      transitionRun(root, "run-legacy", phase, { updates });
+      transitionRun(root, "run-legacy", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
     }
     transitionRun(root, "run-legacy", "completed", {
       updates: {
@@ -773,12 +880,118 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
     const legacy = JSON.parse(readFileSync(sourcePath, "utf8"));
     legacy.schema_version = 7;
     delete legacy.completion_disposition;
+    delete legacy.target.skill_path;
+    for (const field of [
+      "skill_path",
+      "skill_name",
+      "candidate_skill_fingerprint",
+      "evaluation_fixture_path",
+      "evaluation_fixture_sha256",
+    ]) {
+      delete legacy.candidate_snapshot[field];
+    }
+    const legacyChecks = legacy.validation_summary.checks.map(
+      (check) =>
+        check.category === "forward"
+          ? { ...check, details: undefined }
+          : check,
+    );
+    legacy.validation_summary = buildValidationResult(
+      legacy.candidate_snapshot,
+      {
+        checks: legacyChecks,
+        requiredCheckIds: new Set(
+          legacyChecks.map((check) => check.id),
+        ),
+      },
+    );
     writeFileSync(sourcePath, `${JSON.stringify(legacy)}\n`, "utf8");
 
     let observations = 0;
     let liveState = "MERGED";
+    let remoteChangedFiles = [
+      ...CANDIDATE_SNAPSHOT.changed_files,
+    ];
     const githubRunner = (arguments_) => {
       observations += 1;
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1] === "--paginate"
+      ) {
+        assert.deepEqual(arguments_, [
+          "api",
+          "--paginate",
+          "--slurp",
+          "repos/example/skill/pulls/1/files?per_page=100",
+        ]);
+        return {
+          status: 0,
+          stdout: JSON.stringify([
+            remoteChangedFiles.map((filename) => ({ filename })),
+          ]),
+          stderr: "",
+        };
+      }
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1].includes("/git/trees/")
+      ) {
+        assert.deepEqual(arguments_, [
+          "api",
+          `repos/example/skill/git/trees/${MERGE_COMMIT}?recursive=1`,
+        ]);
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            truncated: false,
+            tree: [
+              {
+                path: "SKILL.md",
+                mode: "100644",
+                type: "blob",
+                sha: "a".repeat(40),
+              },
+              {
+                path: "skill/SKILL.md",
+                mode: "100644",
+                type: "blob",
+                sha: "b".repeat(40),
+              },
+            ],
+          }),
+          stderr: "",
+        };
+      }
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1].endsWith(`/${"a".repeat(40)}`)
+      ) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            encoding: "base64",
+            content: Buffer.from(
+              "---\nname: decoy-skill\n---\n",
+            ).toString("base64"),
+          }),
+          stderr: "",
+        };
+      }
+      if (
+        arguments_[0] === "api" &&
+        arguments_[1].endsWith(`/${"b".repeat(40)}`)
+      ) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            encoding: "base64",
+            content: Buffer.from(
+              "---\nname: example-skill\n---\n",
+            ).toString("base64"),
+          }),
+          stderr: "",
+        };
+      }
       assert.deepEqual(arguments_, [
         "pr",
         "view",
@@ -793,7 +1006,8 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
         stdout: JSON.stringify({
           number: 1,
           baseRefName: "main",
-          headRefOid: REPOSITORY_SNAPSHOT.head_commit,
+          headRefOid:
+            CANDIDATE_SNAPSHOT.repository_snapshot.head_commit,
           state: liveState,
           mergedAt: "2026-07-28T08:55:24.000Z",
           mergeCommit: { oid: MERGE_COMMIT },
@@ -857,6 +1071,36 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
     );
 
     liveState = "MERGED";
+    remoteChangedFiles = [
+      ...CANDIDATE_SNAPSHOT.changed_files,
+      "other/SKILL.md",
+    ];
+    assert.throws(
+      () =>
+        createPublicationContinuation(
+          root,
+          {
+            sourceRunId: "run-legacy",
+            runId: "run-release-extra-remote-skill",
+            bindingId: "binding-001",
+            mergeProof,
+          },
+          { githubRunner },
+        ),
+      /changed files.*GitHub Pull Request/u,
+    );
+    assert.equal(
+      existsSync(
+        join(
+          root,
+          "runs",
+          "run-release-extra-remote-skill",
+          "state.json",
+        ),
+      ),
+      false,
+    );
+    remoteChangedFiles = [...CANDIDATE_SNAPSHOT.changed_files];
     const mergeProofPath = join(root, "merge-proof.json");
     writeFileSync(
       mergeProofPath,
@@ -879,7 +1123,7 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
       ],
       { githubRunner },
     );
-    assert.equal(observations, 3);
+    assert.equal(observations, 10);
     assert.equal(
       continuation.continuation.source_completion_kind,
       "legacy_completed",
@@ -890,10 +1134,50 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
       /^[a-f0-9]{64}$/u,
     );
     assert.deepEqual(continuation.merge_proof, mergeProof);
+    assert.equal(continuation.target.skill_path, "skill");
+    assert.equal(continuation.candidate_snapshot.skill_path, "skill");
+    assert.equal(
+      continuation.candidate_snapshot.skill_name,
+      "example-skill",
+    );
+    assert.match(
+      continuation.candidate_snapshot
+        .candidate_skill_fingerprint,
+      /^[a-f0-9]{64}$/u,
+    );
     assert.equal(
       JSON.parse(readFileSync(sourcePath, "utf8")).schema_version,
       7,
     );
+    const continuationBeforeMergeRetry = readRun(root, "run-release");
+    assert.throws(
+      () => transitionRun(root, "run-release", "merge"),
+      /continuation.*不可再次進入 merge/u,
+    );
+    assert.deepEqual(
+      readRun(root, "run-release"),
+      continuationBeforeMergeRetry,
+    );
+    const releaseEvidence = actionEvidence("release", {
+      headCommit: MERGE_COMMIT,
+      runId: "run-release",
+      actionTarget: {
+        version: "v1.0.0",
+        title: "Agent Skill Maintainer v1.0.0",
+        notes: "Release notes.",
+        draft: false,
+        prerelease: false,
+        release_note_coverage: RELEASE_COVERAGE,
+      },
+    });
+    const release = transitionRun(root, "run-release", "release", {
+      updates: {
+        merge_proof: mergeProof,
+        release_coverage: RELEASE_COVERAGE,
+        ...releaseEvidence,
+      },
+    });
+    assert.equal(release.phase, "release");
 
     const continuationPath = join(
       root,
@@ -913,7 +1197,7 @@ test("legacy terminal merge recovery requires exact fresh GitHub proof", () => {
     );
     assert.throws(
       () => readRun(root, "run-release"),
-      /缺少唯讀 merge verification/u,
+      /缺少唯讀 merge 或 candidate identity verification/u,
     );
   });
 });
@@ -926,6 +1210,7 @@ test("publish_pr keeps granular pr_create fallback after a verified push", () =>
       bindingId: "binding-001",
       target: {
         skill: "example-skill",
+        skill_path: "skill",
         repository: "example/skill",
       },
     });
@@ -951,7 +1236,10 @@ test("publish_pr keeps granular pr_create fallback after a verified push", () =>
         },
       ],
     ]) {
-      transitionRun(root, "run-001", phase, { updates });
+      transitionRun(root, "run-001", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
     }
     reserveGithubActionApply(
       root,
@@ -961,8 +1249,35 @@ test("publish_pr keeps granular pr_create fallback after a verified push", () =>
       { providerContractHash: "provider123" },
     );
     assert.throws(
+      () => transitionRun(root, "run-001", "aborted"),
+      /尚未 reconciliation/u,
+    );
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "completed", {
+          updates: {
+            pr_proof: PR_PROOF,
+            completion_disposition: {
+              schema_version: 1,
+              kind: "stop_after_pr",
+              after_phase: "publish_pr",
+              reason: "An in-flight writer cannot be bypassed.",
+            },
+          },
+        }),
+      /尚未 reconciliation/u,
+    );
+    assert.throws(
+      () =>
+        transitionRun(root, "run-001", "optimization_approval", {
+          updates: { optimization_ids: ["OPT-001"] },
+        }),
+      /尚未 reconciliation/u,
+    );
+    assert.equal(readRun(root, "run-001").status, "active");
+    assert.throws(
       () => transitionRun(root, "run-001", "publish_pr"),
-      /未證明未寫入/u,
+      /尚未 reconciliation/u,
     );
     const prCreateUpdates = {
       branch_push_proof: BRANCH_PUSH_PROOF,
@@ -977,7 +1292,7 @@ test("publish_pr keeps granular pr_create fallback after a verified push", () =>
           "pr_creation",
           { updates: prCreateUpdates },
         ),
-      /唯讀證明 PR 不存在/u,
+      /尚未 reconciliation/u,
     );
     recordGithubActionReconciliation(
       root,
@@ -1015,7 +1330,11 @@ test("contribute lifecycle requires verified Fork proof before branch push", () 
     createRun(root, {
       runId: "run-001",
       bindingId: "binding-001",
-      target: { skill: "example-skill", repository: "example/skill" },
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
     });
     for (const [phase, updates] of [
       ["evidence_collection", {}],
@@ -1032,12 +1351,17 @@ test("contribute lifecycle requires verified Fork proof before branch push", () 
       ["implementation", {}],
       ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
     ]) {
-      transitionRun(root, "run-001", phase, { updates });
+      transitionRun(root, "run-001", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
     }
     const branchEvidence = actionEvidence("branch_push", {
       relationship: "contribute",
       actionTarget: {
-        candidate_path_fingerprint: "d".repeat(64),
+        candidate_path_fingerprint: fingerprintCandidatePath(
+          LIVE_CANDIDATE.candidate,
+        ),
         expected_remote_commit: null,
         head_repository: "example-user/skill",
         operation: "create",
@@ -1046,6 +1370,7 @@ test("contribute lifecycle requires verified Fork proof before branch push", () 
     assert.throws(
       () =>
         transitionRun(root, "run-001", "branch_push", {
+          candidatePath: LIVE_CANDIDATE.candidate,
           updates: {
             validation_summary: VALIDATION_SUMMARY,
             ...branchEvidence,
@@ -1063,6 +1388,7 @@ test("contribute lifecycle requires verified Fork proof before branch push", () 
     assert.throws(
       () =>
         transitionRun(root, "run-001", "branch_push", {
+          candidatePath: LIVE_CANDIDATE.candidate,
           updates: {
             fork_proof: {
               ...FORK_PROOF,
@@ -1075,6 +1401,7 @@ test("contribute lifecycle requires verified Fork proof before branch push", () 
       /Fork proof/u,
     );
     const pushed = transitionRun(root, "run-001", "branch_push", {
+      candidatePath: LIVE_CANDIDATE.candidate,
       updates: {
         fork_proof: FORK_PROOF,
         validation_summary: VALIDATION_SUMMARY,
@@ -1091,7 +1418,11 @@ test("Fork attempts persist time and pending reconciliation without replay", () 
     createRun(root, {
       runId: "run-001",
       bindingId: "binding-001",
-      target: { skill: "example-skill", repository: "example/skill" },
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
     });
     for (const [phase, updates] of [
       ["evidence_collection", {}],
@@ -1108,7 +1439,10 @@ test("Fork attempts persist time and pending reconciliation without replay", () 
       ["implementation", {}],
       ["validation", { candidate_snapshot: CANDIDATE_SNAPSHOT }],
     ]) {
-      transitionRun(root, "run-001", phase, { updates });
+      transitionRun(root, "run-001", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
     }
     const evidence = actionEvidence("fork_create");
     transitionRun(root, "run-001", "fork_creation", {
@@ -1163,13 +1497,28 @@ test("Fork attempts persist time and pending reconciliation without replay", () 
     assert.deepEqual(recorded.github_action_reconciliations, [pending]);
     assert.throws(
       () =>
+        transitionRun(root, "run-001", "aborted", {
+          updates: {
+            completion_disposition: {
+              schema_version: 1,
+              kind: "no_improvements",
+              after_phase: "optimization_design",
+              reason: "Pending writer must retain execution ownership.",
+            },
+          },
+        }),
+      /尚未 reconciliation/u,
+    );
+    assert.deepEqual(readRun(root, "run-001"), recorded);
+    assert.throws(
+      () =>
         transitionRun(root, "run-001", "fork_creation", {
           updates: {
             validation_summary: VALIDATION_SUMMARY,
             ...actionEvidence("fork_create"),
           },
         }),
-      /尚未證明未寫入/u,
+      /尚未 reconciliation/u,
     );
 
     const blocked = {
@@ -1217,7 +1566,11 @@ test("GitHub apply reservation binds the active run and blocks replay", () => {
     createRun(root, {
       runId: "run-001",
       bindingId: "binding-001",
-      target: { skill: "example-skill", repository: "example/skill" },
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
     });
     for (const [phase, updates] of [
       ["evidence_collection", {}],
@@ -1241,7 +1594,10 @@ test("GitHub apply reservation binds the active run and blocks replay", () => {
         },
       ],
     ]) {
-      transitionRun(root, "run-001", phase, { updates });
+      transitionRun(root, "run-001", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
     }
     const evidence = actionEvidence("pr_create");
     transitionRun(root, "run-001", "pr_creation", {
@@ -1297,7 +1653,7 @@ test("GitHub apply reservation binds the active run and blocks replay", () => {
             approvals: [blockedRetryApproval],
           },
         }),
-      /尚未證明未寫入/u,
+      /尚未 reconciliation/u,
     );
     const absenceProof = {
       schema_version: 1,
@@ -1546,7 +1902,11 @@ test("implementation lease blocks a second run until terminal cleanup", () => {
       createRun(root, {
         runId,
         bindingId: "binding-001",
-        target: { skill: "example-skill", repository: "example/skill" },
+        target: {
+          skill: "example-skill",
+          skill_path: "skill",
+          repository: "example/skill",
+        },
       });
       for (const phase of [
         "evidence_collection",
@@ -1585,7 +1945,11 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
     createRun(root, {
       runId: "run-001",
       bindingId: "binding-001",
-      target: { skill: "example-skill", repository: "example/skill" },
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
     });
     for (const phase of [
       "evidence_collection",
@@ -1636,11 +2000,11 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
             candidate_snapshot: {
               ...CANDIDATE_SNAPSHOT,
               repository_snapshot: {
-                ...REPOSITORY_SNAPSHOT,
-                process_artifact_prefixes: [],
+                ...CANDIDATE_SNAPSHOT.repository_snapshot,
+                process_artifact_prefixes: ["docs/plans/"],
               },
               changed_files: ["docs/plans/private-plan.md"],
-              process_artifact_prefixes: [],
+              process_artifact_prefixes: ["docs/plans/"],
               file_opt_map: {
                 "docs/plans/private-plan.md": ["OPT-001"],
               },
@@ -1665,6 +2029,7 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
     assert.throws(
       () =>
         transitionRun(root, "run-001", "branch_push", {
+          candidatePath: LIVE_CANDIDATE.candidate,
           updates: {
             candidate_snapshot: CANDIDATE_SNAPSHOT,
             validation_summary: VALIDATION_SUMMARY,
@@ -1676,6 +2041,7 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
     assert.throws(
       () =>
         transitionRun(root, "run-001", "branch_push", {
+          candidatePath: LIVE_CANDIDATE.candidate,
           updates: {
             validation_summary: VALIDATION_SUMMARY,
             ...actionEvidence("branch_push", { runId: "run-002" }),
@@ -1691,12 +2057,14 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
       repository: "example/skill",
       relationship: "managed",
       base_branch: "main",
-      base_commit: REPOSITORY_SNAPSHOT.merge_base,
+      base_commit: CANDIDATE_SNAPSHOT.repository_snapshot.merge_base,
       head_branch: "feature",
-      head_commit: REPOSITORY_SNAPSHOT.head_commit,
+      head_commit: CANDIDATE_SNAPSHOT.repository_snapshot.head_commit,
       diff_hash: CANDIDATE_SNAPSHOT.candidate_diff_hash,
       action_target: {
-        candidate_path_fingerprint: "d".repeat(64),
+        candidate_path_fingerprint: fingerprintCandidatePath(
+          LIVE_CANDIDATE.candidate,
+        ),
         expected_remote_commit: null,
         head_repository: "example/skill",
         operation: "create",
@@ -1718,6 +2086,7 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
     assert.throws(
       () =>
         transitionRun(root, "run-001", "branch_push", {
+          candidatePath: LIVE_CANDIDATE.candidate,
           updates: {
             validation_summary: VALIDATION_SUMMARY,
             action_preview: preview,
@@ -1727,6 +2096,7 @@ test("persisted lifecycle evidence is semantically revalidated", () => {
       /過期/u,
     );
     transitionRun(root, "run-001", "branch_push", {
+      candidatePath: LIVE_CANDIDATE.candidate,
       updates: {
         validation_summary: VALIDATION_SUMMARY,
         ...actionEvidence("branch_push"),
@@ -1750,7 +2120,11 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
     createRun(root, {
       runId: "run-001",
       bindingId: "binding-001",
-      target: { skill: "example-skill", repository: "example/skill" },
+      target: {
+        skill: "example-skill",
+        skill_path: "skill",
+        repository: "example/skill",
+      },
     });
     for (const [phase, updates] of [
       ["evidence_collection", {}],
@@ -1782,7 +2156,10 @@ test("PR, merge, release, and publication proofs stay bound to the active reposi
         },
       ],
     ]) {
-      transitionRun(root, "run-001", phase, { updates });
+      transitionRun(root, "run-001", phase, {
+        updates,
+        candidatePath: LIVE_CANDIDATE.candidate,
+      });
     }
 
     assert.throws(

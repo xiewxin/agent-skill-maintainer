@@ -4,12 +4,14 @@
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ApprovalDriftError,
   canonicalJson,
   clone,
+  compareUtf8,
   fingerprint,
   isObject,
   redactText,
@@ -17,6 +19,7 @@ import {
 } from "./core.mjs";
 import {
   createIsolatedGitTransport,
+  fingerprintTreeEntries,
   isCommitAncestor,
   pushGithubBranch,
   readGithubRemoteBranch,
@@ -58,6 +61,8 @@ const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/u;
 const FORK_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_LEGACY_SKILL_FILES = 512;
+const MAX_LEGACY_SKILL_BYTES = 16 * 1024 * 1024;
 
 /** Carries the deterministic reconcile status for a Fork observation failure. */
 class ForkObservationError extends ApprovalDriftError {
@@ -66,6 +71,117 @@ class ForkObservationError extends ApprovalDriftError {
     this.name = "ForkObservationError";
     this.reconciliationStatus = reconciliationStatus;
   }
+}
+
+/** Reads one bounded legacy merge blob without trusting caller content. */
+function readLegacyMergeBlob(repository, entry, runner) {
+  const blob = parseGithubJson(
+    runGithub(runner, [
+      "api",
+      `repos/${repository}/git/blobs/${entry.sha}`,
+    ]),
+    `GitHub legacy candidate blob ${entry.path}`,
+  );
+  if (
+    blob.encoding !== "base64" ||
+    typeof blob.content !== "string"
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy candidate blob 編碼不支援",
+    );
+  }
+  return Buffer.from(blob.content.replace(/\s/gu, ""), "base64");
+}
+
+/** Computes the verified merged Skill subtree mode/path/blob identity. */
+function buildLegacyMergedSkillIdentity(
+  repository,
+  tree,
+  candidateIdentity,
+  runner,
+) {
+  const prefix =
+    candidateIdentity.path === "."
+      ? ""
+      : `${candidateIdentity.path}/`;
+  const files = [];
+  let totalBytes = 0;
+  for (const entry of tree.tree) {
+    if (
+      typeof entry?.path !== "string" ||
+      (prefix.length > 0 && !entry.path.startsWith(prefix))
+    ) {
+      continue;
+    }
+    const relativePath =
+      prefix.length === 0
+        ? entry.path
+        : entry.path.slice(prefix.length);
+    if (
+      relativePath.length === 0 ||
+      relativePath.split("/").some(
+        (part) =>
+          part.length === 0 ||
+          part === "." ||
+          part === "..",
+      )
+    ) {
+      continue;
+    }
+    if (entry.type === "tree" && entry.mode === "040000") {
+      continue;
+    }
+    if (
+      entry.type !== "blob" ||
+      !["100644", "100755"].includes(entry.mode) ||
+      !COMMIT_PATTERN.test(entry.sha ?? "")
+    ) {
+      throw new ApprovalDriftError(
+        "Legacy candidate Skill tree 含不支援的 entry",
+      );
+    }
+    const payload = readLegacyMergeBlob(
+      repository,
+      entry,
+      runner,
+    );
+    totalBytes += payload.length;
+    files.push({
+      mode: entry.mode,
+      path: relativePath,
+      payload,
+    });
+    if (
+      files.length > MAX_LEGACY_SKILL_FILES ||
+      totalBytes > MAX_LEGACY_SKILL_BYTES
+    ) {
+      throw new ApprovalDriftError(
+        "Legacy candidate Skill tree 超出安全上限",
+      );
+    }
+  }
+  files.sort((first, second) => compareUtf8(first.path, second.path));
+  if (
+    files.length === 0 ||
+    !files.some((file) => file.path === "SKILL.md")
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy candidate Skill tree 缺少 SKILL.md",
+    );
+  }
+  return {
+    ...candidateIdentity,
+    tree_fingerprint: fingerprintTreeEntries(
+      files.map((file) => ({
+        mode: file.mode,
+        path: file.path,
+        sha256: createHash("sha256")
+          .update(file.payload)
+          .digest("hex"),
+      })),
+    ),
+    file_count: files.length,
+  };
 }
 
 /** Runs GitHub CLI without shell expansion or an interactive prompt. */
@@ -423,6 +539,12 @@ export function validateBranchPushLocalState(
   if (!["branch_push", "publish_pr"].includes(preview.action)) {
     throw new Error("只有 branch_push 或 publish_pr 需要 candidate preflight");
   }
+  if (
+    typeof candidatePath !== "string" ||
+    candidatePath.trim().length === 0
+  ) {
+    throw new Error("branch push transition 缺少 live candidate path");
+  }
   const target = branchPushTarget(preview);
   if (
     preview.state.base_branch !==
@@ -766,7 +888,14 @@ function buildActionReconciliationResult(
     ? now.toISOString()
     : new Date(now).toISOString();
   if (
-    !["not_applied", "partial", "pending", "blocked", "drifted"].includes(status)
+    ![
+      "applied",
+      "not_applied",
+      "partial",
+      "pending",
+      "blocked",
+      "drifted",
+    ].includes(status)
   ) {
     throw new Error("GitHub reconcile status 不合法");
   }
@@ -1196,12 +1325,64 @@ function verifyMergedPullRequest(preview, runner) {
   return buildMergeProof(preview, pullRequest);
 }
 
+/** Reads the complete sorted changed-file set from a verified Pull Request. */
+function readLegacyPullRequestChangedFiles(
+  repository,
+  prNumber,
+  runner,
+) {
+  const pages = parseGithubArray(
+    runGithub(runner, [
+      "api",
+      "--paginate",
+      "--slurp",
+      `repos/${repository}/pulls/${prNumber}/files?per_page=100`,
+    ]),
+    "GitHub legacy Pull Request changed files",
+  );
+  if (
+    !Array.isArray(pages) ||
+    pages.length === 0 ||
+    pages.some((page) => !Array.isArray(page))
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy Pull Request changed files 回應不完整",
+    );
+  }
+  const files = pages.flat().map((entry) => entry?.filename);
+  if (
+    files.length === 0 ||
+    files.length >= 3000 ||
+    files.some(
+      (path) =>
+        typeof path !== "string" ||
+        path.length === 0 ||
+        path.startsWith("/") ||
+        path.includes("\\") ||
+        path.split("/").some(
+          (part) =>
+            part.length === 0 ||
+            part === "." ||
+            part === "..",
+        ),
+    ) ||
+    new Set(files).size !== files.length
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy Pull Request changed files 無法完整驗證",
+    );
+  }
+  return files.sort(compareUtf8);
+}
+
 /** Verifies a separately persisted legacy merge proof through fresh reads only. */
 export function verifyLegacyPublicationMerge(
   {
     repository,
     prProof,
     mergeProof,
+    candidateSnapshot,
+    targetSkill,
   },
   { runner = defaultRunner } = {},
 ) {
@@ -1223,6 +1404,15 @@ export function verifyLegacyPublicationMerge(
   ) {
     throw new ApprovalDriftError(
       "Legacy merge proof 與既有 Pull Request 證明不一致",
+    );
+  }
+  if (
+    typeof targetSkill !== "string" ||
+    targetSkill.trim().length === 0 ||
+    !Array.isArray(candidateSnapshot?.changed_files)
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy candidate 缺少可驗證的 Skill identity",
     );
   }
   const pullRequest = parseGithubJson(
@@ -1258,8 +1448,94 @@ export function verifyLegacyPublicationMerge(
     );
   }
   validateDocument("merge-proof", observedProof);
+  const remoteChangedFiles = readLegacyPullRequestChangedFiles(
+    repository,
+    prProof.number,
+    runner,
+  );
+  const persistedChangedFiles = [...candidateSnapshot.changed_files]
+    .sort(compareUtf8);
+  if (
+    canonicalJson(remoteChangedFiles) !==
+      canonicalJson(persistedChangedFiles)
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy candidate changed files 與 GitHub Pull Request 不一致",
+    );
+  }
+  const skillCandidates = remoteChangedFiles.filter(
+    (path) =>
+      path === "SKILL.md" || path.endsWith("/SKILL.md"),
+  );
+  if (
+    skillCandidates.length === 0 ||
+    skillCandidates.length > 32
+  ) {
+    throw new ApprovalDriftError(
+      "Legacy candidate 缺少可驗證的 Skill identity",
+    );
+  }
+  const tree = parseGithubJson(
+    runGithub(runner, [
+      "api",
+      `repos/${repository}/git/trees/${observedProof.merge_commit}?recursive=1`,
+    ]),
+    "GitHub legacy merged tree",
+  );
+  if (!Array.isArray(tree.tree) || tree.truncated === true) {
+    throw new ApprovalDriftError(
+      "Legacy candidate tree 不完整，無法驗證 Skill identity",
+    );
+  }
+  const matchingSkills = [];
+  for (const path of skillCandidates) {
+    const entries = tree.tree.filter((entry) => entry?.path === path);
+    if (
+      entries.length !== 1 ||
+      entries[0].type !== "blob" ||
+      !["100644", "100755"].includes(entries[0].mode) ||
+      !COMMIT_PATTERN.test(entries[0].sha ?? "")
+    ) {
+      continue;
+    }
+    const content = readLegacyMergeBlob(
+      repository,
+      { ...entries[0], path },
+      runner,
+    ).toString("utf8");
+    const frontmatter = content.match(
+      /^---\r?\n(?<body>[\s\S]*?)\r?\n---(?:\r?\n|$)/u,
+    );
+    const names = [
+      ...(frontmatter?.groups?.body ?? "").matchAll(
+        /^name:\s*(?<name>[^\r\n#]+?)\s*$/gmu,
+      ),
+    ].map((match) => match.groups.name.trim());
+    if (names.length === 1 && names[0] === targetSkill) {
+      matchingSkills.push({
+        path: path === "SKILL.md"
+          ? "."
+          : path.slice(0, -"/SKILL.md".length),
+        name: names[0],
+        mode: entries[0].mode,
+        blob_sha: entries[0].sha,
+      });
+    }
+  }
+  if (matchingSkills.length !== 1) {
+    throw new ApprovalDriftError(
+      "Legacy candidate Skill identity 無法唯一驗證",
+    );
+  }
+  const candidateIdentity = buildLegacyMergedSkillIdentity(
+    repository,
+    tree,
+    matchingSkills[0],
+    runner,
+  );
   return {
     merge_proof: observedProof,
+    candidate_identity: candidateIdentity,
     verification_fingerprint: fingerprint({
       repository,
       pr_number: prProof.number,
@@ -1267,6 +1543,9 @@ export function verifyLegacyPublicationMerge(
       head_commit: prProof.head_commit,
       merge_commit: observedProof.merge_commit,
       merged_at: pullRequest.mergedAt,
+      identity_commit: observedProof.merge_commit,
+      remote_changed_files_sha256: fingerprint(remoteChangedFiles),
+      candidate_identity: candidateIdentity,
     }),
   };
 }
@@ -2492,10 +2771,13 @@ export function reconcileGithubAction(
       now,
     );
   }
-  return {
-    action: preview.action,
-    repository: preview.state.repository,
-    status: "applied",
-    proof: reconciliation.proof,
-  };
+  const result = buildActionReconciliationResult(
+    preview,
+    approvalFingerprint,
+    reconciliation.proof,
+    "applied",
+    now,
+  );
+  result.proof = reconciliation.proof;
+  return result;
 }

@@ -9,13 +9,22 @@ import {
   readdirSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { extname, relative, resolve, sep } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  dirname,
+  extname,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   FORMAL_PROVIDER_IDS,
   LEGACY_PROVIDER_IDS,
   PROVIDER_IDS,
   SCHEMA_NAMES,
+  canonicalJson,
+  loadSchema,
   loadProviderProfiles,
   validateDocument,
   validateProviderValidationAggregate,
@@ -33,6 +42,7 @@ const REQUIRED_FILES = Object.freeze([
   "SECURITY.md",
   "CONTRIBUTING.md",
   "package.json",
+  "scripts/neutral-evaluation-controller.mjs",
   ".agents/architecture.md",
   ".agents/documentation.md",
   ".agents/releasing.md",
@@ -45,6 +55,8 @@ const REQUIRED_FILES = Object.freeze([
   ".agents/adr/0007-read-only-legacy-merge-recovery.md",
   ".agents/adr/0008-transactional-candidate-cleanup.md",
   ".agents/adr/0009-traceable-blinded-adjudication.md",
+  ".agents/adr/0010-bound-legacy-remote-skill-identity.md",
+  ".agents/adr/0011-exact-private-evaluation-binding.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/skill-feedback.yml",
   ".github/ISSUE_TEMPLATE/bug.yml",
@@ -53,7 +65,7 @@ const REQUIRED_FILES = Object.freeze([
   "evals/cases/sample-cleanup-forward.json",
   "evals/cases/release-continuation-heldout.json",
   "evals/cases/archive-release-resumption-heldout.json",
-  "evals/cases/candidate-cleanup-scoring-heldout.json",
+  "evals/cases/evaluation-binding-heldout.json",
   "evals/cases/fork-creation-forward.json",
   "evals/cases/local-update-forward.json",
   "evals/evidence/preview-v1.0.0.json",
@@ -90,7 +102,6 @@ const REQUIRED_FILES = Object.freeze([
 ]);
 const EXCLUDED_PARTS = new Set([
   ".git",
-  "node_modules",
 ]);
 const PROCESS_PREFIXES = Object.freeze([
   ["docs", "plans"],
@@ -127,11 +138,6 @@ const PRIVATE_PATH_PATTERNS = [
   /\/home\/[^/\s]+\//u,
 ];
 
-/** Returns repository-relative path components. */
-function relativeParts(path) {
-  return relative(ROOT, path).split(sep);
-}
-
 /** Returns whether a relative path is a local-only process artifact. */
 export function isProcessArtifact(relativePath) {
   const parts = relativePath.split("/");
@@ -145,9 +151,9 @@ export function isProcessArtifact(relativePath) {
 }
 
 /** Returns tracked repository paths without following ignore rules. */
-function trackedRepositoryPaths() {
+function trackedRepositoryPaths(root = ROOT) {
   const result = spawnSync("git", ["ls-files", "-z"], {
-    cwd: ROOT,
+    cwd: root,
     encoding: "utf8",
     env: {
       ...process.env,
@@ -175,17 +181,37 @@ export function validateTrackedProcessArtifacts(relativePaths) {
     );
 }
 
-/** Walks public regular text files without following symlinks. */
-function publicTextFiles() {
+/** Walks public regular text files, including tracked dependencies, without links. */
+export function publicTextFiles(
+  root = ROOT,
+  trackedRelativePaths = trackedRepositoryPaths(root),
+) {
   const files = [];
+  const trackedPaths = new Set(trackedRelativePaths);
+  const trackedDirectories = new Set();
+  for (const trackedPath of trackedPaths) {
+    const parts = trackedPath.split("/");
+    for (let index = 1; index < parts.length; index += 1) {
+      trackedDirectories.add(parts.slice(0, index).join("/"));
+    }
+  }
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = resolve(directory, entry.name);
-      const parts = relativeParts(path);
+      const parts = relative(root, path).split(sep);
       if (parts.some((part) => EXCLUDED_PARTS.has(part))) {
         continue;
       }
       const relativePath = parts.join("/");
+      const insideDependency =
+        parts.includes("node_modules");
+      if (
+        insideDependency &&
+        !trackedPaths.has(relativePath) &&
+        !trackedDirectories.has(relativePath)
+      ) {
+        continue;
+      }
       if (isProcessArtifact(relativePath)) {
         continue;
       }
@@ -205,8 +231,72 @@ function publicTextFiles() {
       }
     }
   };
-  visit(ROOT);
+  visit(root);
   return files;
+}
+
+/** Reports missing or escaping repository-relative Markdown links. */
+export function validateMarkdownRelativeLinks(
+  files = publicTextFiles(),
+  root = ROOT,
+) {
+  const errors = [];
+  for (const file of files) {
+    if (
+      file.symlink ||
+      file.content === null ||
+      extname(file.relativePath).toLowerCase() !== ".md"
+    ) {
+      continue;
+    }
+    for (const match of file.content.matchAll(
+      /\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/gu,
+    )) {
+      let target = match[1];
+      if (target.startsWith("<") && target.endsWith(">")) {
+        target = target.slice(1, -1);
+      }
+      if (
+        target.startsWith("#") ||
+        target.startsWith("//") ||
+        /^[a-z][a-z0-9+.-]*:/iu.test(target)
+      ) {
+        continue;
+      }
+      try {
+        target = decodeURIComponent(
+          target.split("#", 1)[0].split("?", 1)[0],
+        );
+      } catch {
+        errors.push(
+          `invalid Markdown link encoding: ${file.relativePath}: ${target}`,
+        );
+        continue;
+      }
+      if (target.length === 0) {
+        continue;
+      }
+      const path = resolve(dirname(file.path), target);
+      const repositoryRelative = relative(root, path);
+      if (
+        repositoryRelative === ".." ||
+        repositoryRelative.startsWith(`..${sep}`)
+      ) {
+        errors.push(
+          `Markdown link escapes repository: ${file.relativePath}: ${target}`,
+        );
+        continue;
+      }
+      try {
+        lstatSync(path);
+      } catch {
+        errors.push(
+          `missing Markdown link target: ${file.relativePath}: ${target}`,
+        );
+      }
+    }
+  }
+  return errors;
 }
 
 /** Validates versioned schemas and conservative Provider Profiles. */
@@ -302,9 +392,48 @@ export function validateStructuredAssets(skillRoot = SKILL_ROOT) {
   return errors;
 }
 
+/** Returns blockers when the live neutral controller drifts from its fixture. */
+export function validateNeutralControllerSource(root = ROOT) {
+  try {
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve(
+          root,
+          "evals",
+          "cases",
+          "evaluation-binding-heldout.json",
+        ),
+        "utf8",
+      ),
+    );
+    const controllerSha256 = createHash("sha256")
+      .update(
+        readFileSync(
+          resolve(
+            root,
+            "scripts",
+            "neutral-evaluation-controller.mjs",
+          ),
+        ),
+      )
+      .digest("hex");
+    return controllerSha256 ===
+        fixture?.evaluator_authority?.controller_sha256
+      ? []
+      : [
+          "neutral evaluator controller does not match the locked fixture",
+        ];
+  } catch (error) {
+    return [
+      `neutral evaluator controller verification failed: ${error.message}`,
+    ];
+  }
+}
+
 /** Returns all blockers for public publication. */
 export function validatePublication() {
   const errors = validateStructuredAssets();
+  errors.push(...validateMarkdownRelativeLinks());
   try {
     errors.push(
       ...validateTrackedProcessArtifacts(trackedRepositoryPaths()),
@@ -321,6 +450,7 @@ export function validatePublication() {
       errors.push(`missing required file: ${relativePath}`);
     }
   }
+  errors.push(...validateNeutralControllerSource());
   let ignorePatterns = new Set();
   try {
     ignorePatterns = new Set(
@@ -366,6 +496,22 @@ export function validatePublication() {
     }
   }
   try {
+    if (
+      canonicalJson(loadSchema("platform-validation").$defs) !==
+        canonicalJson(
+          loadSchema("platform-validation-evidence").$defs,
+        )
+    ) {
+      errors.push(
+        "platform attestation schema definitions must remain identical",
+      );
+    }
+  } catch (error) {
+    errors.push(
+      `cannot compare platform attestation schema definitions: ${error.message}`,
+    );
+  }
+  try {
     const aggregate = JSON.parse(
       readFileSync(
         resolve(ROOT, "evals", "evidence", "provider-validation-v1.0.0.json"),
@@ -406,11 +552,9 @@ export function validatePublication() {
         errors.push(`secret-like value found: ${file.relativePath}`);
       }
     }
-    if (!isValidator && !isTest) {
-      for (const pattern of PRIVATE_PATH_PATTERNS) {
-        if (pattern.test(file.content)) {
-          errors.push(`private absolute path found: ${file.relativePath}`);
-        }
+    for (const pattern of PRIVATE_PATH_PATTERNS) {
+      if (pattern.test(file.content)) {
+        errors.push(`private absolute path found: ${file.relativePath}`);
       }
     }
   }

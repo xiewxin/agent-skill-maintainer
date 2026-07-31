@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiewxin.github.io/agent-skill-maintainer/schemas/platform-validation-evidence.schema.json",
+  "title": "Self-contained Private Platform Validation Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_skill_fingerprint",
+    "validated_at",
+    "installer",
+    "challenge_attestation",
+    "completion_attestation",
+    "installed_copies",
+    "platforms",
+    "environment_baseline_failures",
+    "passed"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "candidate_skill_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+    "validated_at": {"type": "string", "format": "date-time"},
+    "challenge_attestation": {
+      "$ref": "#/$defs/platformChallengeAttestation"
+    },
+    "completion_attestation": {
+      "$ref": "#/$defs/platformCompletionAttestation"
+    },
+    "installer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "scope"],
+      "properties": {
+        "name": {"type": "string", "const": "skills"},
+        "version": {"type": "string", "minLength": 1},
+        "scope": {"type": "string", "const": "isolated-project-copy"}
+      }
+    },
+    "installed_copies": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "platform",
+          "case",
+          "installation_relative_path",
+          "tree_fingerprint",
+          "file_count"
+        ],
+        "properties": {
+          "platform": {"type": "string", "enum": ["codex", "claude-code"]},
+          "case": {"type": "string", "enum": ["positive", "negative"]},
+          "installation_relative_path": {"type": "string", "enum": [".agents/skills/agent-skill-maintainer", ".claude/skills/agent-skill-maintainer"]},
+          "tree_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+          "file_count": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "explicit_trigger",
+          "target_and_reference_read",
+          "positive_analysis",
+          "negative_non_trigger",
+          "stable_ids",
+          "decision_boundary",
+          "files_modified",
+          "positive_provider_session_nonce",
+          "negative_provider_session_nonce",
+          "positive_output",
+          "positive_output_sha256",
+          "positive_transcript",
+          "positive_transcript_sha256",
+          "negative_output",
+          "negative_output_sha256",
+          "negative_transcript",
+          "negative_transcript_sha256",
+          "passed"
+        ],
+        "properties": {
+          "id": {"type": "string", "enum": ["codex", "claude-code"]},
+          "version": {"type": "string", "minLength": 1},
+          "explicit_trigger": {"type": "boolean"},
+          "target_and_reference_read": {"type": "boolean"},
+          "positive_analysis": {"type": "boolean"},
+          "negative_non_trigger": {"type": "boolean"},
+          "stable_ids": {"type": "boolean"},
+          "decision_boundary": {"type": "boolean"},
+          "files_modified": {"type": "boolean"},
+          "positive_provider_session_nonce": {"type": "string", "minLength": 1},
+          "negative_provider_session_nonce": {"type": "string", "minLength": 1},
+          "positive_output": {"type": "string", "minLength": 1},
+          "positive_output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+          "positive_transcript": {"type": "string", "minLength": 1},
+          "positive_transcript_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+          "negative_output": {"type": "string", "minLength": 1},
+          "negative_output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+          "negative_transcript": {"type": "string", "minLength": 1},
+          "negative_transcript_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "environment_baseline_failures": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {"$ref": "#/$defs/portabilityFailure"}
+    },
+    "passed": {"type": "boolean"}
+  },
+  "$defs": {
+    "portabilityFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "profile",
+        "status",
+        "reason_code",
+        "blocking_current_environment_gate"
+      ],
+      "properties": {
+        "platform": {"type": "string", "const": "claude-code"},
+        "profile": {"type": "string", "const": "default-only"},
+        "status": {"type": "string", "const": "unavailable"},
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "authentication_unavailable",
+            "routing_unavailable",
+            "model_unavailable",
+            "provider_error"
+          ]
+        },
+        "blocking_current_environment_gate": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "platformCompletionAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "authority_id",
+        "authority_version",
+        "controller_sha256",
+        "candidate_skill_fingerprint",
+        "evaluation_input_sha256",
+        "challenge_payload_sha256",
+        "attested_at",
+        "sessions",
+        "payload_sha256",
+        "signature_base64"
+      ],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "authority_id": {"type": "string", "minLength": 1},
+        "authority_version": {"type": "string", "minLength": 1},
+        "controller_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "candidate_skill_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "evaluation_input_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "challenge_payload_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "attested_at": {"type": "string", "format": "date-time"},
+        "sessions": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "platform",
+              "case",
+              "platform_version",
+              "executable_sha256",
+              "execution_profile_sha256",
+              "environment_sha256",
+              "prompt_template_sha256",
+              "prompt_sha256",
+              "workspace_root",
+              "installation_relative_path",
+              "source_copy_before",
+              "source_copy_after",
+              "installed_copy_before",
+              "installed_copy_after",
+              "required_reads",
+              "challenge_nonce",
+              "started_at",
+              "completed_at",
+              "exit_status",
+              "output_sha256",
+              "transcript_sha256",
+              "provider_session_nonce",
+              "tool_calls",
+              "tool_sequence_sha256"
+            ],
+            "properties": {
+              "platform": {"type": "string", "enum": ["codex", "claude-code"]},
+              "case": {"type": "string", "enum": ["positive", "negative"]},
+              "platform_version": {"type": "string", "minLength": 1},
+              "executable_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "execution_profile_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "environment_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "prompt_template_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "prompt_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "workspace_root": {"type": "string", "minLength": 1},
+              "installation_relative_path": {"type": "string", "enum": [".agents/skills/agent-skill-maintainer", ".claude/skills/agent-skill-maintainer"]},
+              "source_copy_before": {"$ref": "#/$defs/treeIdentity"},
+              "source_copy_after": {"$ref": "#/$defs/treeIdentity"},
+              "installed_copy_before": {"$ref": "#/$defs/treeIdentity"},
+              "installed_copy_after": {"$ref": "#/$defs/treeIdentity"},
+              "required_reads": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {"$ref": "#/$defs/requiredRead"}
+              },
+              "challenge_nonce": {"type": "string", "minLength": 16},
+              "started_at": {"type": "string", "format": "date-time"},
+              "completed_at": {"type": "string", "format": "date-time"},
+              "exit_status": {"type": "integer", "const": 0},
+              "output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "transcript_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "provider_session_nonce": {"type": "string", "minLength": 1},
+              "tool_calls": {"type": "integer", "minimum": 0},
+              "tool_sequence_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+            }
+          }
+        },
+        "payload_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "signature_base64": {"type": "string", "minLength": 1}
+      }
+    },
+    "platformChallengeAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "authority_id",
+        "authority_version",
+        "controller_sha256",
+        "candidate_skill_fingerprint",
+        "evaluation_input_sha256",
+        "issued_at",
+        "expires_at",
+        "challenges",
+        "payload_sha256",
+        "signature_base64"
+      ],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "authority_id": {"type": "string", "minLength": 1},
+        "authority_version": {"type": "string", "minLength": 1},
+        "controller_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "candidate_skill_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "evaluation_input_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"},
+        "challenges": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "platform",
+              "case",
+              "platform_version",
+              "executable_sha256",
+              "execution_profile_sha256",
+              "environment_sha256",
+              "prompt_template_sha256",
+              "installation_relative_path",
+              "challenge_nonce"
+            ],
+            "properties": {
+              "platform": {"type": "string", "enum": ["codex", "claude-code"]},
+              "case": {"type": "string", "enum": ["positive", "negative"]},
+              "platform_version": {"type": "string", "minLength": 1},
+              "executable_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "execution_profile_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "environment_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "prompt_template_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "installation_relative_path": {"type": "string", "enum": [".agents/skills/agent-skill-maintainer", ".claude/skills/agent-skill-maintainer"]},
+              "challenge_nonce": {"type": "string", "minLength": 16}
+            }
+          }
+        },
+        "payload_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "signature_base64": {"type": "string", "minLength": 1}
+      }
+    },
+    "treeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tree_fingerprint", "file_count"],
+      "properties": {
+        "tree_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "file_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "requiredRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+      }
+    }
+  }
+}

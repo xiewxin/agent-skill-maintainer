@@ -18,9 +18,9 @@ This repository publishes the `agent-skill-maintainer` Agent Skill.
 - Keep schema versions explicit and provide deterministic migration before changing persisted run state.
 - See [`.agents/architecture.md`](.agents/architecture.md), [the runtime ADR](.agents/adr/0001-node-runtime.md), [the branch-push ADR](.agents/adr/0002-deterministic-branch-push.md), [the Fork-creation ADR](.agents/adr/0003-deterministic-fork-creation.md), [the local-update ADR](.agents/adr/0004-deterministic-local-skill-update.md), and [the stable-Provider ADR](.agents/adr/0005-stable-provider-validation.md).
 - Publication capability proofs, explicit terminal dispositions, bounded release continuation, compound `publish_pr`, and held-out A/B evidence follow [ADR 0006](.agents/adr/0006-evidence-bound-publication-continuation.md).
-- Read-only recovery of a pre-v8 merge proof follows [ADR 0007](.agents/adr/0007-read-only-legacy-merge-recovery.md).
+- Read-only recovery of a pre-v8 merge proof, exact remote changed-file identity, and release-only continuation follow [ADR 0010](.agents/adr/0010-bound-legacy-remote-skill-identity.md).
 - Candidate cleanup uses an independent attempt-first quarantine transaction defined by [ADR 0008](.agents/adr/0008-transactional-candidate-cleanup.md).
-- Blinded evaluation verdict provenance and derived schema v3 aggregates follow [ADR 0009](.agents/adr/0009-traceable-blinded-adjudication.md).
+- Blinded transcript policy, private-source binding, signed platform challenge and completion evidence, and neutral-controller attestation follow [ADR 0011](.agents/adr/0011-exact-private-evaluation-binding.md).
 - Before changing repository guidance or its indexes, read [`.agents/documentation.md`](.agents/documentation.md).
 
 ## Hard boundaries

@@ -29,6 +29,7 @@ import {
 import {
   canonicalJson,
   clone,
+  compareUtf8,
   fingerprint,
   validateCandidateSnapshotContract,
   validateDocument,
@@ -146,7 +147,7 @@ function scanTree(root, { allowMissingEntries = false } = {}) {
   let totalBytes = 0;
   const visit = (directory) => {
     const children = readdirSync(directory, { withFileTypes: true })
-      .sort((first, second) => first.name.localeCompare(second.name));
+      .sort((first, second) => compareUtf8(first.name, second.name));
     for (const child of children) {
       const absolute = join(directory, child.name);
       const relativePath = relative(root, absolute).split(sep).join("/");
@@ -179,6 +180,7 @@ function scanTree(root, { allowMissingEntries = false } = {}) {
     }
   };
   visit(root);
+  entries.sort((first, second) => compareUtf8(first.path, second.path));
   return {
     entries,
     file_count: fileCount,

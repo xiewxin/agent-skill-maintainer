@@ -27,10 +27,15 @@ import {
   validateDocument,
   validateForkProofContract,
   validatePrProofContract,
-  validatePrReadyValidation,
 } from "./core.mjs";
+import {
+  validateLegacyTerminalValidation,
+  validatePrReadyValidation,
+  validateRecordedPrReadyValidation,
+} from "./evaluation.mjs";
 import { verifyReleaseNoteCoverageProof } from "./git.mjs";
 import {
+  validateBranchPushLocalState,
   verifyGithubActionApproval,
   verifyLegacyPublicationMerge,
 } from "./github.mjs";
@@ -151,6 +156,7 @@ const LEGACY_PHASES = Object.freeze({
 });
 const TARGET_FIELDS = new Set([
   "skill",
+  "skill_path",
   "repository",
   "version",
   "source_commit",
@@ -284,6 +290,26 @@ function minimalTarget(target) {
   const minimal = clone(target);
   if (typeof minimal.skill !== "string" || minimal.skill.trim().length === 0) {
     throw new Error("target.skill 為必填");
+  }
+  if (
+    minimal.skill_path !== undefined &&
+    (
+      typeof minimal.skill_path !== "string" ||
+      minimal.skill_path.trim() !== minimal.skill_path ||
+      minimal.skill_path.length === 0 ||
+      minimal.skill_path.startsWith("/") ||
+      minimal.skill_path.includes("\\") ||
+      minimal.skill_path.split("/").some(
+        (part) =>
+          part.length === 0 ||
+          part === ".." ||
+          (part === "." && minimal.skill_path !== "."),
+      )
+    )
+  ) {
+    throw new Error(
+      "target.skill_path 必須是規範化的倉庫相對路徑",
+    );
   }
   return minimal;
 }
@@ -482,21 +508,29 @@ export function readRun(
   if (
     document.continuation?.source_completion_kind ===
       "legacy_completed" &&
-    typeof document.continuation
-      .legacy_merge_verification_fingerprint !== "string"
+    (
+      typeof document.continuation
+        .legacy_merge_verification_fingerprint !== "string" ||
+      typeof document.continuation
+        .legacy_candidate_identity_fingerprint !== "string"
+    )
   ) {
     throw new Error(
-      "Legacy publication continuation 缺少唯讀 merge verification",
+      "Legacy publication continuation 缺少唯讀 merge 或 candidate identity verification",
     );
   }
   if (
-    document.continuation
-      ?.legacy_merge_verification_fingerprint !== undefined &&
+    (
+      document.continuation
+        ?.legacy_merge_verification_fingerprint !== undefined ||
+      document.continuation
+        ?.legacy_candidate_identity_fingerprint !== undefined
+    ) &&
     document.continuation.source_completion_kind !==
       "legacy_completed"
   ) {
     throw new Error(
-      "Legacy merge verification 不可綁定一般 publication continuation",
+      "Legacy verification 不可綁定一般 publication continuation",
     );
   }
   if (migrated && persistMigration) {
@@ -535,6 +569,11 @@ export function createPublicationContinuation(
       "只有相同 binding 的 terminal run 可續接發布",
     );
   }
+  if (hasPendingGithubApply(source)) {
+    throw new InvalidStateTransition(
+      "來源 terminal run 仍有未完成的 GitHub action，必須先 reconcile",
+    );
+  }
   const standardContinuation =
     source.completion_disposition?.kind === "stop_after_merge" &&
     source.completion_disposition?.after_phase === "merge";
@@ -547,7 +586,10 @@ export function createPublicationContinuation(
     );
   }
   validateDocument("merge-proof", mergeProof);
-  const candidate = validateRunCandidate(source);
+  let candidate = standardContinuation
+    ? validateRunCandidate(source)
+    : validateLegacyRunCandidate(source);
+  let continuationTarget = clone(source.target);
   validateDocument("pr-proof", source.pr_proof);
   if (
     source.pr_proof.repository !== source.target?.repository ||
@@ -562,6 +604,7 @@ export function createPublicationContinuation(
   }
   let resolvedMergeProof;
   let legacyMergeVerificationFingerprint;
+  let legacyCandidateFileCount;
   if (standardContinuation) {
     validateDocument("merge-proof", source.merge_proof);
     if (canonicalJson(mergeProof) !== canonicalJson(source.merge_proof)) {
@@ -576,7 +619,7 @@ export function createPublicationContinuation(
         "Legacy terminal run 已含 merge proof，不能使用外部恢復路徑",
       );
     }
-    const validation = validatePrReadyValidation(
+    const validation = validateLegacyTerminalValidation(
       source.validation_summary,
       candidate,
     );
@@ -597,12 +640,27 @@ export function createPublicationContinuation(
         repository: source.target.repository,
         prProof: source.pr_proof,
         mergeProof,
+        candidateSnapshot: candidate,
+        targetSkill: source.target.skill,
       },
       { runner: githubRunner },
     );
+    candidate = {
+      ...candidate,
+      skill_path: verification.candidate_identity.path,
+      skill_name: verification.candidate_identity.name,
+      candidate_skill_fingerprint:
+        verification.candidate_identity.tree_fingerprint,
+    };
+    continuationTarget = {
+      ...continuationTarget,
+      skill_path: verification.candidate_identity.path,
+    };
     resolvedMergeProof = verification.merge_proof;
     legacyMergeVerificationFingerprint =
       verification.verification_fingerprint;
+    legacyCandidateFileCount =
+      verification.candidate_identity.file_count;
   }
 
   return withBindingLock(root, safeBindingId, () => {
@@ -619,6 +677,11 @@ export function createPublicationContinuation(
         "來源 terminal run 已漂移，必須重新驗證",
       );
     }
+    if (hasPendingGithubApply(currentSource)) {
+      throw new InvalidStateTransition(
+        "來源 terminal run 仍有未完成的 GitHub action，必須先 reconcile",
+      );
+    }
     const leaseCreated = claimImplementationLease(
       root,
       safeBindingId,
@@ -631,7 +694,7 @@ export function createPublicationContinuation(
         binding_id: safeBindingId,
         phase: "merge",
         status: "active",
-        target: clone(source.target),
+        target: continuationTarget,
         approvals: [],
         consumed_approval_fingerprints: [],
         attempted_github_action_fingerprints: [],
@@ -644,7 +707,7 @@ export function createPublicationContinuation(
         feedback_ids: clone(source.feedback_ids ?? []),
         optimization_ids: clone(source.optimization_ids ?? []),
         repository_snapshot: clone(source.repository_snapshot),
-        candidate_snapshot: clone(source.candidate_snapshot),
+        candidate_snapshot: clone(candidate),
         validation_summary: clone(source.validation_summary),
         pr_proof: clone(source.pr_proof),
         merge_proof: clone(resolvedMergeProof),
@@ -660,6 +723,14 @@ export function createPublicationContinuation(
             : {
                 legacy_merge_verification_fingerprint:
                   legacyMergeVerificationFingerprint,
+                legacy_candidate_identity_fingerprint: fingerprint({
+                  skill_path: candidate.skill_path,
+                  skill_name: candidate.skill_name,
+                  candidate_skill_fingerprint:
+                    candidate.candidate_skill_fingerprint,
+                  file_count: legacyCandidateFileCount,
+                  merge_commit: resolvedMergeProof.merge_commit,
+                }),
               }),
         },
       };
@@ -1426,6 +1497,15 @@ function validateRunCandidate(document) {
     document.candidate_snapshot,
   );
   if (
+    typeof document.target?.skill_path !== "string" ||
+    candidate.skill_path !== document.target.skill_path ||
+    candidate.skill_name !== document.target.skill
+  ) {
+    throw new InvalidStateTransition(
+      "candidate Skill 名稱或路徑與已確認 target 不一致",
+    );
+  }
+  if (
     canonicalJson(candidate.process_artifact_prefixes) !==
     canonicalJson(document.repository_snapshot.process_artifact_prefixes)
   ) {
@@ -1434,6 +1514,48 @@ function validateRunCandidate(document) {
     );
   }
   return candidate;
+}
+
+/** Validates a pre-v8 terminal candidate without inventing current identity. */
+function validateLegacyRunCandidate(document) {
+  const candidate = validateCandidateSnapshotContract(
+    document.candidate_snapshot,
+  );
+  if (
+    canonicalJson(candidate.process_artifact_prefixes) !==
+    canonicalJson(document.repository_snapshot.process_artifact_prefixes)
+  ) {
+    throw new InvalidStateTransition(
+      "legacy candidate 過程檔合同與 repository snapshot 不一致",
+    );
+  }
+  const identityValues = [
+    document.target?.skill_path,
+    candidate.skill_path,
+    candidate.skill_name,
+  ];
+  if (identityValues.some((value) => value !== undefined)) {
+    return validateRunCandidate(document);
+  }
+  return candidate;
+}
+
+/** Detects any remote action that still owns mutation authority. */
+function hasPendingGithubApply(document) {
+  return document.github_action_attempts.some((attempt) => {
+    const reconciliation = document.github_action_reconciliations
+      .filter(
+        (item) =>
+          item.action === attempt.action &&
+          item.approval_fingerprint ===
+            attempt.approval_fingerprint,
+      )
+      .at(-1);
+    return (
+      reconciliation === undefined ||
+      reconciliation.status === "pending"
+    );
+  });
 }
 
 /** Requires an explicit stop reason that matches the phase being completed. */
@@ -1508,7 +1630,11 @@ function validateCompletionDisposition(document) {
 }
 
 /** Enforces proof-forward contracts before entering side-effect stages. */
-function requirePhaseEvidence(document, nextPhase) {
+function requirePhaseEvidence(
+  document,
+  nextPhase,
+  { candidatePath } = {},
+) {
   if (nextPhase === "isolation") {
     validateDocument("repository-snapshot", document.repository_snapshot);
     requireActionApproval(document, "implementation", {
@@ -1521,7 +1647,10 @@ function requirePhaseEvidence(document, nextPhase) {
   }
   if (nextPhase === "fork_creation") {
     const candidate = validateRunCandidate(document);
-    validatePrReadyValidation(document.validation_summary, candidate);
+    validateRecordedPrReadyValidation(
+      document.validation_summary,
+      candidate,
+    );
     requireActionApproval(
       document,
       "fork_create",
@@ -1543,7 +1672,16 @@ function requirePhaseEvidence(document, nextPhase) {
   }
   if (nextPhase === "branch_push") {
     const candidate = validateRunCandidate(document);
-    validatePrReadyValidation(document.validation_summary, candidate);
+    validateBranchPushLocalState(
+      document.action_preview,
+      candidatePath,
+      candidate,
+    );
+    validatePrReadyValidation(
+      document.validation_summary,
+      candidate,
+      candidatePath,
+    );
     requireActionApproval(
       document,
       "branch_push",
@@ -1570,7 +1708,16 @@ function requirePhaseEvidence(document, nextPhase) {
   }
   if (nextPhase === "publish_pr") {
     const candidate = validateRunCandidate(document);
-    validatePrReadyValidation(document.validation_summary, candidate);
+    validateBranchPushLocalState(
+      document.action_preview,
+      candidatePath,
+      candidate,
+    );
+    validatePrReadyValidation(
+      document.validation_summary,
+      candidate,
+      candidatePath,
+    );
     requireActionApproval(
       document,
       "publish_pr",
@@ -1597,7 +1744,7 @@ function requirePhaseEvidence(document, nextPhase) {
   }
   if (["pr_creation", "pr_update"].includes(nextPhase)) {
     const candidate = validateRunCandidate(document);
-    const validation = validatePrReadyValidation(
+    const validation = validateRecordedPrReadyValidation(
       document.validation_summary,
       candidate,
     );
@@ -1672,8 +1819,13 @@ function requirePhaseEvidence(document, nextPhase) {
     }
   }
   if (nextPhase === "merge") {
+    if (document.continuation !== undefined) {
+      throw new InvalidStateTransition(
+        "publication continuation 已含 merge proof，不可再次進入 merge",
+      );
+    }
     const candidate = validateRunCandidate(document);
-    const validation = validatePrReadyValidation(
+    const validation = validateRecordedPrReadyValidation(
       document.validation_summary,
       candidate,
     );
@@ -1816,7 +1968,7 @@ export function transitionRun(
   stateRoot,
   runId,
   nextPhase,
-  { updates = {} } = {},
+  { updates = {}, candidatePath } = {},
 ) {
   const root = resolve(stateRoot);
   const initial = readRun(root, runId);
@@ -1831,6 +1983,11 @@ export function transitionRun(
     ) {
       throw new InvalidStateTransition(
         `不可由 ${document.phase} 進入 ${nextPhase}`,
+      );
+    }
+    if (hasPendingGithubApply(document)) {
+      throw new InvalidStateTransition(
+        "GitHub action 已保留執行權且尚未 reconciliation，不可轉換 run",
       );
     }
     if (!isObject(updates)) {
@@ -1908,7 +2065,7 @@ export function transitionRun(
         }
       }
       Object.assign(document, clone(updates));
-      requirePhaseEvidence(document, nextPhase);
+      requirePhaseEvidence(document, nextPhase, { candidatePath });
       if (nextPhase === "release") {
         document.release_version = currentActionTarget(
           document,

@@ -13,6 +13,9 @@ import {
   buildZeroImprovementOutcome,
   classifyRelationship,
   classifyUntrustedCommand,
+  compareUtf8,
+  fingerprint,
+  loadSchema,
   loadProviderProfiles,
   publicationGate,
   redactText,
@@ -32,8 +35,19 @@ import {
   verifyApproval,
 } from "../skills/agent-skill-maintainer/scripts/lib/core.mjs";
 import {
+  buildForwardEvaluationBinding,
+  deriveBlindedForwardAggregate,
+  validateForwardEvaluationBinding,
+  validateLegacyTerminalValidation,
+  validatePrReadyValidation,
+} from "../skills/agent-skill-maintainer/scripts/lib/evaluation.mjs";
+import {
+  fingerprintTree,
+} from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
+import {
   candidateFixture,
   evidenceFixture,
+  forwardEvaluationBindingFixture,
   feedbackFixture,
   optimizationFixture,
 } from "./fixtures.mjs";
@@ -41,8 +55,62 @@ import {
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_ROOT = resolve(ROOT, "skills", "agent-skill-maintainer");
 
+/** Builds one minimal valid value from the supported schema subset. */
+function schemaExample(rule, rootSchema) {
+  if (typeof rule.$ref === "string") {
+    const target = rule.$ref
+      .slice(2)
+      .split("/")
+      .reduce(
+        (current, segment) =>
+          current[segment.replaceAll("~1", "/").replaceAll("~0", "~")],
+        rootSchema,
+      );
+    return schemaExample(target, rootSchema);
+  }
+  if (Object.hasOwn(rule, "const")) {
+    return rule.const;
+  }
+  if (Array.isArray(rule.enum)) {
+    return rule.enum[0];
+  }
+  if (rule.type === "object") {
+    return Object.fromEntries(
+      (rule.required ?? []).map((name) => [
+        name,
+        schemaExample(rule.properties[name], rootSchema),
+      ]),
+    );
+  }
+  if (rule.type === "array") {
+    return Array.from(
+      { length: rule.minItems ?? 0 },
+      () => schemaExample(rule.items, rootSchema),
+    );
+  }
+  if (rule.type === "string") {
+    if (rule.format === "date-time") {
+      return "2030-01-01T00:00:00.000Z";
+    }
+    if (rule.pattern === "[a-f0-9]{64}") {
+      return "a".repeat(64);
+    }
+    return "x".repeat(Math.max(rule.minLength ?? 0, 1));
+  }
+  if (rule.type === "integer" || rule.type === "number") {
+    return rule.minimum ?? 0;
+  }
+  if (rule.type === "boolean") {
+    return false;
+  }
+  if (rule.type === "null") {
+    return null;
+  }
+  throw new Error(`unsupported test schema rule: ${JSON.stringify(rule)}`);
+}
+
 test("all public schemas parse and lock an explicit version", () => {
-  assert.equal(SCHEMA_NAMES.length, 37);
+  assert.equal(SCHEMA_NAMES.length, 40);
   for (const schema of SCHEMA_NAMES) {
     const document = JSON.parse(
       readFileSync(
@@ -57,6 +125,16 @@ test("all public schemas parse and lock an explicit version", () => {
     assert.ok(Number.isInteger(document.properties.schema_version.const));
     assert.ok(document.required.includes("schema_version"));
   }
+});
+
+test("tree ordering uses deterministic UTF-8 bytes", () => {
+  const names = ["é.txt", "z.txt", "e\u0301.txt"];
+  assert.deepEqual(
+    [...names].sort(compareUtf8),
+    [...names].sort((first, second) =>
+      Buffer.compare(Buffer.from(first), Buffer.from(second))),
+  );
+  assert.notEqual(compareUtf8("é.txt", "e\u0301.txt"), 0);
 });
 
 test("runtime schema validation rejects incomplete documents", () => {
@@ -78,6 +156,107 @@ test("runtime schema validation rejects incomplete documents", () => {
       local_update_reconciliations: [],
     }),
     true,
+  );
+});
+
+test("platform schemas enforce local refs, date-time, and matching attestation definitions", () => {
+  const sourceSchema = loadSchema("platform-validation");
+  const evidenceSchema = loadSchema(
+    "platform-validation-evidence",
+  );
+  assert.deepEqual(sourceSchema.$defs, evidenceSchema.$defs);
+
+  const document = schemaExample(sourceSchema, sourceSchema);
+  assert.equal(
+    validateDocument("platform-validation", document),
+    true,
+  );
+  const nullAttestation = structuredClone(document);
+  nullAttestation.challenge_attestation = null;
+  assert.throws(
+    () => validateDocument("platform-validation", nullAttestation),
+    /必須是 object/u,
+  );
+  const invalidAttestedAt = structuredClone(document);
+  invalidAttestedAt.completion_attestation.attested_at =
+    "definitely-not-a-date";
+  assert.throws(
+    () => validateDocument("platform-validation", invalidAttestedAt),
+    /RFC 3339 date-time/u,
+  );
+  for (const invalidDateTime of [
+    "2026-02-30T00:00:00Z",
+    "2023-02-29T00:00:00Z",
+    "2026-01-01T24:00:00Z",
+    "2026-01-01T00:00:00+24:00",
+    "2026-01-01T00:00:60Z",
+  ]) {
+    const invalidCalendar = structuredClone(document);
+    invalidCalendar.completion_attestation.attested_at =
+      invalidDateTime;
+    assert.throws(
+      () =>
+        validateDocument(
+          "platform-validation",
+          invalidCalendar,
+        ),
+      /RFC 3339 date-time/u,
+      invalidDateTime,
+    );
+  }
+  for (const validDateTime of [
+    "2024-02-29T23:59:59.123456789Z",
+    "1990-12-31T23:59:60Z",
+    "1990-12-31T15:59:60-08:00",
+  ]) {
+    const validCalendar = structuredClone(document);
+    validCalendar.completion_attestation.attested_at = validDateTime;
+    assert.equal(
+      validateDocument("platform-validation", validCalendar),
+      true,
+      validDateTime,
+    );
+  }
+
+  const portabilityFailure = {
+    platform: "claude-code",
+    profile: "default-only",
+    status: "unavailable",
+    reason_code: "authentication_unavailable",
+    blocking_current_environment_gate: false,
+  };
+  const disclosed = structuredClone(document);
+  disclosed.environment_baseline_failures = [
+    portabilityFailure,
+  ];
+  assert.equal(
+    validateDocument("platform-validation", disclosed),
+    true,
+  );
+  disclosed.environment_baseline_failures.push(
+    portabilityFailure,
+  );
+  assert.throws(
+    () => validateDocument("platform-validation", disclosed),
+    /最多允許 1 項/u,
+  );
+  const blocking = structuredClone(document);
+  blocking.environment_baseline_failures = [{
+    ...portabilityFailure,
+    blocking_current_environment_gate: true,
+  }];
+  assert.throws(
+    () => validateDocument("platform-validation", blocking),
+    /必須等於 false/u,
+  );
+  const expanded = structuredClone(document);
+  expanded.environment_baseline_failures = [{
+    ...portabilityFailure,
+    detail: "unbounded provider response",
+  }];
+  assert.throws(
+    () => validateDocument("platform-validation", expanded),
+    /含未知欄位：detail/u,
   );
 });
 
@@ -157,7 +336,10 @@ test("raw, unredacted, and incomplete evidence is rejected", () => {
     () =>
       validateEvidenceRecords([
         evidenceFixture({
-          source_ref: "/Users/example/private/transcript.md",
+          source_ref: [
+            "/Users",
+            "example/private/transcript.md",
+          ].join("/"),
         }),
       ]),
     /尚未脫敏/u,
@@ -708,5 +890,376 @@ test("validation result requires complete mapping and safety pass", () => {
         requiredCheckIds: new Set(["publication"]),
       }),
     /文檔影響檢查/u,
+  );
+});
+
+test("PR-ready validation requires a matching schema v5 aggregate binding", (t) => {
+  const sourceCandidate = candidateFixture({
+    skill_path: "skills/agent-skill-maintainer",
+    skill_name: "agent-skill-maintainer",
+    candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+  });
+  const prepared = forwardEvaluationBindingFixture(
+    sourceCandidate,
+    ROOT,
+    { includePrivateSources: true },
+  );
+  t.after(prepared.cleanup);
+  const candidate = prepared.sources.candidateSnapshot;
+  const candidatePath = prepared.sources.candidatePath;
+  const binding = prepared.binding;
+  const checks = [
+    {
+      id: "publication",
+      category: "safety",
+      status: "passed",
+      summary: "公開資料檢查通過。",
+    },
+    {
+      id: "regression",
+      category: "regression",
+      status: "passed",
+      summary: "回歸案例通過。",
+    },
+    {
+      id: "forward",
+      category: "forward",
+      status: "passed",
+      summary: "前向評估通過。",
+      details: binding,
+    },
+    {
+      id: "quality",
+      category: "quality",
+      status: "passed",
+      summary: "候選品質門檻通過。",
+    },
+    {
+      id: "agent-documentation-impact",
+      category: "documentation",
+      status: "passed",
+      summary: "Agent 指引已更新。",
+      details: {
+        schema_version: 1,
+        status: "updated",
+        changed_guides: ["SKILL.md"],
+        root_index_action: "verified-current",
+        contract_preserved: true,
+        reason: "前向評估合同已更新。",
+      },
+    },
+  ];
+  const summary = buildValidationResult(candidate, {
+    checks,
+    requiredCheckIds: new Set(checks.map((check) => check.id)),
+  });
+  assert.deepEqual(
+    validatePrReadyValidation(summary, candidate, candidatePath),
+    summary,
+  );
+
+  const unbound = buildValidationResult(candidate, {
+    checks: checks.map((check) =>
+      check.id === "forward"
+        ? { ...check, details: undefined }
+        : check,
+    ),
+    requiredCheckIds: new Set(checks.map((check) => check.id)),
+  });
+  assert.throws(
+    () =>
+      validatePrReadyValidation(
+        unbound,
+        candidate,
+        candidatePath,
+      ),
+    /文件必須是 JSON object/u,
+  );
+});
+
+test("forward binding rejects legacy, drifted, failed, and edited aggregates", (t) => {
+  const sourceCandidate = candidateFixture({
+    skill_path: "skills/agent-skill-maintainer",
+    skill_name: "agent-skill-maintainer",
+    candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+  });
+  const prepared = forwardEvaluationBindingFixture(
+    sourceCandidate,
+    ROOT,
+    { includePrivateSources: true },
+  );
+  t.after(prepared.cleanup);
+  const candidate = prepared.sources.candidateSnapshot;
+  const candidatePath = prepared.sources.candidatePath;
+  const binding = prepared.binding;
+  const sources = {
+    fixture: binding.fixture,
+    candidatePath,
+  };
+  assert.throws(
+    () =>
+      buildForwardEvaluationBinding(candidate, sources),
+    /output|private|measurement/u,
+  );
+
+  const legacyBinding = structuredClone(binding);
+  legacyBinding.schema_version = 1;
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        legacyBinding,
+        candidate,
+        candidatePath,
+      ),
+    /schema_version/u,
+  );
+
+  const publicOnly = structuredClone(binding);
+  delete publicOnly.private_sources;
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        publicOnly,
+        candidate,
+        candidatePath,
+      ),
+    /private_sources/u,
+  );
+
+  const forgedAuthority = structuredClone(binding);
+  forgedAuthority.evaluator_attestation.signature_base64 =
+    Buffer.alloc(64).toString("base64");
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        forgedAuthority,
+        candidate,
+        candidatePath,
+      ),
+    /neutral evaluator attestation signature/u,
+  );
+
+  for (const field of [
+    "assignment_sha256",
+    "sessions_sha256",
+    "measured_at_sha256",
+    "unblinded_at_sha256",
+  ]) {
+    const forgedPrivateSource = structuredClone(binding);
+    forgedPrivateSource.source_manifest[field] =
+      field === "assignment_sha256"
+        ? "0".repeat(64)
+        : "1".repeat(64);
+    assert.throws(
+      () =>
+        validateForwardEvaluationBinding(
+          forgedPrivateSource,
+          candidate,
+          candidatePath,
+        ),
+      /private source manifest/u,
+    );
+  }
+
+  const driftedCandidate = candidateFixture({
+    candidate_skill_fingerprint: "d".repeat(64),
+  });
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        binding,
+        driftedCandidate,
+        candidatePath,
+      ),
+    /candidate snapshot fingerprint/u,
+  );
+
+  const edited = structuredClone(binding);
+  edited.aggregate.cost.candidate_tool_calls += 1;
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        edited,
+        candidate,
+        candidatePath,
+      ),
+    /private sources 精確重建|aggregate fingerprint/u,
+  );
+
+  const forgedQuality = structuredClone(binding);
+  forgedQuality.aggregate.forward_evaluation
+    .false_positive_optimizations = 1;
+  forgedQuality.aggregate_fingerprint =
+    fingerprint(forgedQuality.aggregate);
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        forgedQuality,
+        candidate,
+        candidatePath,
+      ),
+    /private sources 精確重建/u,
+  );
+
+  const forgedCost = structuredClone(binding);
+  forgedCost.aggregate.cost.artifact_byte_ratio = 0;
+  forgedCost.aggregate_fingerprint = fingerprint(forgedCost.aggregate);
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        forgedCost,
+        candidate,
+        candidatePath,
+      ),
+    /private sources 精確重建/u,
+  );
+
+  const forgedProtocol = structuredClone(binding);
+  forgedProtocol.aggregate.protocol.judge_model_id = "other-model";
+  forgedProtocol.aggregate_fingerprint =
+    fingerprint(forgedProtocol.aggregate);
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        forgedProtocol,
+        candidate,
+        candidatePath,
+      ),
+    /private sources 精確重建/u,
+  );
+
+  const contentDrift = structuredClone(binding);
+  contentDrift.fixture.target_files.candidate_sha256["SKILL.md"] =
+    "f".repeat(64);
+  assert.throws(
+    () =>
+      deriveBlindedForwardAggregate({
+        adjudication: contentDrift.adjudication,
+        measurement: contentDrift.measurement,
+        fixture: contentDrift.fixture,
+        currentSkillFingerprint:
+          candidate.candidate_skill_fingerprint,
+      }),
+    /locked fixture/u,
+  );
+
+  const forgedFixture = structuredClone(binding);
+  forgedFixture.fixture.aggregate_template.platform_requirements
+    .platforms = ["codex"];
+  forgedFixture.fixture.aggregate_template.limits = ["forged-limit"];
+  assert.throws(
+    () =>
+      deriveBlindedForwardAggregate({
+        adjudication: forgedFixture.adjudication,
+        measurement: forgedFixture.measurement,
+        fixture: forgedFixture.fixture,
+        currentSkillFingerprint:
+          candidate.candidate_skill_fingerprint,
+      }),
+    /locked fixture/u,
+  );
+
+  for (const mutate of [
+    (item) => {
+      item.aggregate.evaluated_at = "2026-07-29T12:00:00.000Z";
+    },
+    (item) => {
+      item.aggregate.platform_validation.platforms[0].version =
+        "forged-version";
+    },
+    (item) => {
+      item.aggregate.limits = ["forged-limit"];
+    },
+  ]) {
+    const forgedSourceField = structuredClone(binding);
+    mutate(forgedSourceField);
+    forgedSourceField.aggregate_fingerprint =
+      fingerprint(forgedSourceField.aggregate);
+    assert.throws(
+      () =>
+        validateForwardEvaluationBinding(
+          forgedSourceField,
+          candidate,
+          candidatePath,
+        ),
+      /private sources 精確重建|private source manifest/u,
+    );
+  }
+
+  const failed = structuredClone(binding);
+  failed.aggregate.forward_evaluation.passed = false;
+  failed.aggregate_fingerprint = fingerprint(failed.aggregate);
+  assert.throws(
+    () =>
+      validateForwardEvaluationBinding(
+        failed,
+        candidate,
+        candidatePath,
+      ),
+    /private sources 精確重建/u,
+  );
+});
+
+test("legacy candidate validation is read-only compatible but not PR-ready", () => {
+  const legacyCandidate = candidateFixture();
+  delete legacyCandidate.skill_path;
+  delete legacyCandidate.skill_name;
+  delete legacyCandidate.candidate_skill_fingerprint;
+  const checks = [
+    {
+      id: "publication",
+      category: "safety",
+      status: "passed",
+      summary: "公開資料檢查通過。",
+    },
+    {
+      id: "regression",
+      category: "regression",
+      status: "passed",
+      summary: "回歸案例通過。",
+    },
+    {
+      id: "forward",
+      category: "forward",
+      status: "passed",
+      summary: "舊版前向檢查通過。",
+    },
+    {
+      id: "quality",
+      category: "quality",
+      status: "passed",
+      summary: "候選品質門檻通過。",
+    },
+    {
+      id: "agent-documentation-impact",
+      category: "documentation",
+      status: "passed",
+      summary: "舊版 Agent 指引檢查通過。",
+      details: {
+        schema_version: 1,
+        status: "not-required",
+        changed_guides: [],
+        root_index_action: "not-applicable",
+        contract_preserved: true,
+        reason: "保留舊版終態記錄的唯讀解析。",
+      },
+    },
+  ];
+  const summary = buildValidationResult(legacyCandidate, {
+    checks,
+    requiredCheckIds: new Set(checks.map((check) => check.id)),
+  });
+  assert.throws(
+    () =>
+      validatePrReadyValidation(
+        summary,
+        legacyCandidate,
+        SKILL_ROOT,
+      ),
+    /缺少 Skill 或 fixture fingerprint/u,
+  );
+  assert.deepEqual(
+    validateLegacyTerminalValidation(summary, legacyCandidate),
+    summary,
   );
 });
