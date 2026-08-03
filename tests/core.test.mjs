@@ -1,8 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ApprovalDriftError,
@@ -43,13 +52,19 @@ import {
 } from "../skills/agent-skill-maintainer/scripts/lib/evaluation.mjs";
 import {
   fingerprintTree,
+  runGit as runSafeGit,
 } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 import {
   candidateFixture,
   evidenceFixture,
+  FORWARD_EVALUATION_BASELINE_COMMIT,
+  FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
   forwardEvaluationBindingFixture,
+  forwardEvaluationRepositorySnapshot,
   feedbackFixture,
   optimizationFixture,
+  resolveMaterializedTestPath,
+  resolveMaterializedTestRoot,
 } from "./fixtures.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -895,9 +910,12 @@ test("validation result requires complete mapping and safety pass", () => {
 
 test("PR-ready validation requires a matching schema v5 aggregate binding", (t) => {
   const sourceCandidate = candidateFixture({
+    repository_snapshot: forwardEvaluationRepositorySnapshot(ROOT),
     skill_path: "skills/agent-skill-maintainer",
     skill_name: "agent-skill-maintainer",
     candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+    process_artifact_prefixes:
+      FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
   });
   const prepared = forwardEvaluationBindingFixture(
     sourceCandidate,
@@ -979,9 +997,12 @@ test("PR-ready validation requires a matching schema v5 aggregate binding", (t) 
 
 test("forward binding rejects legacy, drifted, failed, and edited aggregates", (t) => {
   const sourceCandidate = candidateFixture({
+    repository_snapshot: forwardEvaluationRepositorySnapshot(ROOT),
     skill_path: "skills/agent-skill-maintainer",
     skill_name: "agent-skill-maintainer",
     candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+    process_artifact_prefixes:
+      FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
   });
   const prepared = forwardEvaluationBindingFixture(
     sourceCandidate,
@@ -1198,6 +1219,188 @@ test("forward binding rejects legacy, drifted, failed, and edited aggregates", (
       ),
     /private sources 精確重建/u,
   );
+});
+
+test("forward binding preserves stable semantics across candidate finalization", (t) => {
+  const root = mkdtempSync(
+    join(tmpdir(), "maintainer-forward-finalization-"),
+  );
+  const repository = join(root, "candidate");
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (workingDirectory, ...arguments_) =>
+    runSafeGit(workingDirectory, arguments_, {
+      label: "Git finalization test",
+    }).trim();
+  git(root, "clone", "--no-local", "--", ROOT, repository);
+  git(repository, "config", "user.name", "Test User");
+  git(repository, "config", "user.email", "test@example.invalid");
+  const trackedPaths = git(ROOT, "ls-files", "-z")
+    .split("\0")
+    .filter((item) => item.length > 0);
+  for (const relativePath of trackedPaths) {
+    const source = resolveMaterializedTestPath(ROOT, relativePath);
+    const destination = resolveMaterializedTestPath(
+      repository,
+      relativePath,
+    );
+    if (!existsSync(source)) {
+      rmSync(destination, { recursive: true, force: true });
+      continue;
+    }
+    if (!lstatSync(source).isFile()) {
+      throw new Error("tracked candidate path must be a regular file");
+    }
+    mkdirSync(dirname(destination), { recursive: true });
+    rmSync(destination, { recursive: true, force: true });
+    copyFileSync(source, destination);
+    chmodSync(destination, lstatSync(source).mode & 0o777);
+  }
+  git(repository, "add", "-A");
+  const candidateTree = git(repository, "write-tree");
+  git(
+    repository,
+    "reset",
+    "--mixed",
+    FORWARD_EVALUATION_BASELINE_COMMIT,
+  );
+
+  const prepare = () => {
+    const candidate = candidateFixture({
+      repository_snapshot:
+        forwardEvaluationRepositorySnapshot(repository),
+      skill_path: "skills/agent-skill-maintainer",
+      skill_name: "agent-skill-maintainer",
+      candidate_skill_fingerprint: fingerprintTree(
+        join(repository, "skills", "agent-skill-maintainer"),
+      ),
+      process_artifact_prefixes:
+        FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
+    });
+    assert.deepEqual(
+      candidate.repository_snapshot.process_artifact_prefixes,
+      FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
+    );
+    return forwardEvaluationBindingFixture(
+      candidate,
+      repository,
+      { includePrivateSources: true },
+    );
+  };
+  // Each binding still validates its complete ephemeral evidence separately.
+  // Cross-representation equality covers only stable semantic commitments.
+  const stableProjection = ({ binding }) => {
+    const platform = binding.aggregate.platform_validation;
+    return {
+      baseline_tree_fingerprint:
+        binding.fixture.runtime_bundle.baseline_tree_fingerprint,
+      candidate_tree_fingerprint:
+        binding.fixture.runtime_bundle.candidate_tree_fingerprint,
+      target_files: binding.fixture.target_files,
+      evaluation_input_sha256:
+        binding.aggregate.protocol.evaluation_input_sha256,
+      adjudication: {
+        rubric_sha256: binding.adjudication.rubric_sha256,
+        behaviors: binding.adjudication.behaviors,
+        quality: binding.adjudication.quality,
+      },
+      measurement: {
+        evaluation_input_sha256:
+          binding.measurement.evaluation_input_sha256,
+        labels: binding.measurement.labels,
+      },
+      forward_evaluation: binding.aggregate.forward_evaluation,
+      cost: binding.aggregate.cost,
+      platform_validation: {
+        candidate_skill_fingerprint:
+          platform.candidate_skill_fingerprint,
+        installer: platform.installer,
+        installed_copies: platform.installed_copies,
+        platforms: platform.platforms.map((item) => ({
+          id: item.id,
+          version: item.version,
+          explicit_trigger: item.explicit_trigger,
+          target_and_reference_read: item.target_and_reference_read,
+          positive_analysis: item.positive_analysis,
+          negative_non_trigger: item.negative_non_trigger,
+          stable_ids: item.stable_ids,
+          decision_boundary: item.decision_boundary,
+          files_modified: item.files_modified,
+          positive_output_sha256: item.positive_output_sha256,
+          negative_output_sha256: item.negative_output_sha256,
+          passed: item.passed,
+        })),
+        passed: platform.passed,
+      },
+    };
+  };
+
+  const dirty = prepare();
+  t.after(dirty.cleanup);
+  git(repository, "add", "-A");
+  git(repository, "commit", "-m", "finalize candidate");
+  assert.equal(
+    git(repository, "rev-parse", "HEAD^{tree}"),
+    candidateTree,
+  );
+  const committed = prepare();
+  t.after(committed.cleanup);
+
+  assert.deepEqual(
+    stableProjection(committed),
+    stableProjection(dirty),
+  );
+});
+
+test("forward binding fails closed for missing or drifted merge-base identity", () => {
+  const sourceCandidate = candidateFixture({
+    repository_snapshot: forwardEvaluationRepositorySnapshot(ROOT),
+    skill_path: "skills/agent-skill-maintainer",
+    skill_name: "agent-skill-maintainer",
+    candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+  });
+  const missing = structuredClone(sourceCandidate);
+  missing.repository_snapshot.merge_base = "f".repeat(40);
+  assert.throws(
+    () =>
+      forwardEvaluationBindingFixture(missing, ROOT, {
+        includePrivateSources: true,
+      }),
+    /Git test baseline commit/u,
+  );
+
+  const drifted = structuredClone(sourceCandidate);
+  drifted.repository_snapshot.merge_base =
+    drifted.repository_snapshot.head_commit;
+  assert.throws(
+    () =>
+      forwardEvaluationBindingFixture(drifted, ROOT, {
+        includePrivateSources: true,
+      }),
+    /does not match the locked fixture/u,
+  );
+});
+
+test("baseline materialization paths cannot escape their temporary root", () => {
+  const root = join(tmpdir(), "maintainer-materialization-root");
+  assert.equal(resolveMaterializedTestRoot(root, "."), resolve(root));
+  assert.equal(
+    resolveMaterializedTestPath(root, "scripts/maintainer.mjs"),
+    join(root, "scripts", "maintainer.mjs"),
+  );
+  for (const path of ["../escape", "..\\escape", "nested\\escape"]) {
+    assert.throws(
+      () => resolveMaterializedTestPath(root, path),
+      /test baseline path/u,
+      path,
+    );
+  }
+  for (const skillPath of ["../escape", "..\\escape"]) {
+    assert.throws(
+      () => resolveMaterializedTestRoot(root, skillPath),
+      /test baseline path/u,
+      skillPath,
+    );
+  }
 });
 
 test("legacy candidate validation is read-only compatible but not PR-ready", () => {

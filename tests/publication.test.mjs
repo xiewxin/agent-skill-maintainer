@@ -55,7 +55,9 @@ import {
   codexTranscript,
   createBranchPushFixture,
   evaluationTranscriptTools,
+  FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
   forwardEvaluationBindingFixture,
+  forwardEvaluationRepositorySnapshot,
   githubCapability,
   initializeRepository,
   localRemoteGitRunner,
@@ -940,9 +942,12 @@ test("CLI binds schema v5 private sources to the exact candidate Skill", () => {
   let privateBundle;
   try {
     const candidate = candidateFixture({
+      repository_snapshot: forwardEvaluationRepositorySnapshot(ROOT),
       skill_path: "skills/agent-skill-maintainer",
       skill_name: "agent-skill-maintainer",
       candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+      process_artifact_prefixes:
+        FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
     });
     privateBundle = forwardEvaluationBindingFixture(
       candidate,
@@ -1083,9 +1088,12 @@ test("neutral controller independently rejects forbidden tools and provider subs
   let privateBundle;
   try {
     const candidate = candidateFixture({
+      repository_snapshot: forwardEvaluationRepositorySnapshot(ROOT),
       skill_path: "skills/agent-skill-maintainer",
       skill_name: "agent-skill-maintainer",
       candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+      process_artifact_prefixes:
+        FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
     });
     privateBundle = forwardEvaluationBindingFixture(
       candidate,

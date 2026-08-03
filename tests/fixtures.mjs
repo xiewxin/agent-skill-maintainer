@@ -6,6 +6,7 @@ import {
   sign,
 } from "node:crypto";
 import {
+  chmodSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
@@ -15,7 +16,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildApproval,
@@ -39,7 +47,10 @@ import {
   countTreeFiles,
   createIsolatedCandidate,
   fingerprintTree,
+  inspectCandidateCommitTree,
+  readCandidateCommitRegularFile,
   runGit as runSafeGit,
+  validateCommit,
 } from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
 import {
   buildGithubCapabilityProof,
@@ -86,6 +97,14 @@ const DEFAULT_ROUTE_ENVIRONMENT_POLICY_ID =
   "formal-default-route-v1";
 const CURRENT_ENVIRONMENT_POLICY_ID =
   "formal-current-environment-v1";
+export const FORWARD_EVALUATION_BASELINE_COMMIT =
+  "9a0e001d92abe86d0d8c4f34d66170bd78ca8059";
+export const FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES =
+  Object.freeze([
+    "docs/plans/",
+    "docs/specs/",
+    "docs/superpowers/",
+  ]);
 export const TEST_PLATFORM_INSTALL_PATHS = Object.freeze({
   codex: ".agents/skills/agent-skill-maintainer",
   "claude-code": ".claude/skills/agent-skill-maintainer",
@@ -498,6 +517,111 @@ export function candidateFixture(overrides = {}) {
   };
 }
 
+/** Builds the repository identity used by the locked forward fixture. */
+export function forwardEvaluationRepositorySnapshot(repository) {
+  return buildRepositorySnapshot(repository, {
+    baseRef: FORWARD_EVALUATION_BASELINE_COMMIT,
+    processArtifactPrefixes:
+      FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
+  });
+}
+
+/** Resolves one portable Git path beneath a materialization root. */
+export function resolveMaterializedTestPath(root, relativePath) {
+  if (
+    typeof relativePath !== "string" ||
+    relativePath.length === 0 ||
+    relativePath.includes("\\")
+  ) {
+    throw new Error("test baseline path is not portable");
+  }
+  const target = resolve(root, ...relativePath.split("/"));
+  const containment = relative(resolve(root), target);
+  if (
+    containment === "" ||
+    containment === ".." ||
+    containment.startsWith(`..${sep}`) ||
+    isAbsolute(containment)
+  ) {
+    throw new Error("test baseline path escapes materialization root");
+  }
+  return target;
+}
+
+/** Resolves a candidate Skill root beneath a materialization root. */
+export function resolveMaterializedTestRoot(root, skillPath) {
+  if (skillPath === ".") {
+    return resolve(root);
+  }
+  return resolveMaterializedTestPath(root, skillPath);
+}
+
+/** Materializes one immutable baseline subtree without archive extraction. */
+function materializeForwardEvaluationBaseline(
+  repository,
+  candidateSnapshot,
+  destinationRoot,
+) {
+  const commit = validateCommit(
+    candidateSnapshot.repository_snapshot.merge_base,
+    "test baseline merge_base",
+  );
+  const objectType = runSafeGit(
+    repository,
+    ["cat-file", "-t", commit],
+    {
+      readOnly: true,
+      label: "Git test baseline commit",
+    },
+  ).trim();
+  if (objectType !== "commit") {
+    throw new Error("test baseline merge_base must resolve to a commit");
+  }
+  const skillPath = candidateSnapshot.skill_path;
+  const inspected = inspectCandidateCommitTree(
+    repository,
+    commit,
+    skillPath,
+  );
+  const destination = resolveMaterializedTestRoot(
+    destinationRoot,
+    skillPath,
+  );
+  mkdirSync(destination, { recursive: true });
+  for (const relativePath of Object.keys(inspected.file_sha256)) {
+    const repositoryPath = skillPath === "."
+      ? relativePath
+      : `${skillPath}/${relativePath}`;
+    const payload = readCandidateCommitRegularFile(
+      repository,
+      commit,
+      repositoryPath,
+    );
+    const actualSha256 = createHash("sha256")
+      .update(payload)
+      .digest("hex");
+    if (actualSha256 !== inspected.file_sha256[relativePath]) {
+      throw new Error("test baseline blob changed during materialization");
+    }
+    const target = resolveMaterializedTestPath(
+      destination,
+      relativePath,
+    );
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, payload, { flag: "wx" });
+    chmodSync(
+      target,
+      inspected.file_modes[relativePath] === "100755"
+        ? 0o755
+        : 0o644,
+    );
+  }
+  if (fingerprintTree(destination) !== inspected.fingerprint) {
+    throw new Error("test baseline changed during materialization");
+  }
+  return destination;
+}
+
 /** Returns one aggregate binding tied to the exact candidate snapshot. */
 export function forwardEvaluationBindingFixture(
   candidateSnapshot,
@@ -578,45 +702,22 @@ export function forwardEvaluationBindingFixture(
     candidatePath = isolatedEvaluationRoot;
   }
   const runtimePath = join(candidatePath, candidateSnapshot.skill_path);
-  let baselineRuntimeRoot = null;
-  let baselineRuntimePath = runtimePath;
+  const lockedBaselineFingerprint =
+    fixture.runtime_bundle.baseline_tree_fingerprint;
+  const baselineRuntimeRoot = mkdtempSync(
+    join(tmpdir(), "maintainer-baseline-runtime-"),
+  );
+  const baselineRuntimePath = materializeForwardEvaluationBaseline(
+    sourceCandidatePath,
+    candidateSnapshot,
+    baselineRuntimeRoot,
+  );
   if (
-    fingerprintTree(runtimePath) !==
-    fixture.runtime_bundle.baseline_tree_fingerprint
+    fingerprintTree(baselineRuntimePath) !==
+    lockedBaselineFingerprint
   ) {
-    baselineRuntimeRoot = mkdtempSync(
-      join(tmpdir(), "maintainer-baseline-runtime-"),
-    );
-    const archive = spawnSync(
-      "git",
-      [
-        "-C",
-        sourceCandidatePath,
-        "archive",
-        "--format=tar",
-        "HEAD",
-        candidateSnapshot.skill_path,
-      ],
-      { encoding: null },
-    );
-    if (archive.status !== 0) {
-      throw new Error(
-        `test baseline archive failed: ${archive.stderr.toString("utf8")}`,
-      );
-    }
-    const extract = spawnSync(
-      "tar",
-      ["-xf", "-", "-C", baselineRuntimeRoot],
-      { input: archive.stdout, encoding: null },
-    );
-    if (extract.status !== 0) {
-      throw new Error(
-        `test baseline extract failed: ${extract.stderr.toString("utf8")}`,
-      );
-    }
-    baselineRuntimePath = join(
-      baselineRuntimeRoot,
-      candidateSnapshot.skill_path,
+    throw new Error(
+      "test baseline merge_base does not match the locked fixture",
     );
   }
   const controllerPath = NEUTRAL_CONTROLLER_PATH;
@@ -1308,6 +1409,61 @@ export function createBranchPushFixture({
   relationship = "managed",
 } = {}) {
   const fixture = createIsolationFixture({ prefix });
+  mkdirSync(join(fixture.source, "skill", "scripts"), {
+    recursive: true,
+  });
+  mkdirSync(join(fixture.source, "skill", "references"), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(fixture.source, "skill", "SKILL.md"),
+    "---\nname: example-skill\n---\nbaseline skill\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(fixture.source, "skill", "scripts", "maintainer.mjs"),
+    [
+      "#!/usr/bin/env node",
+      "process.stderr.write(",
+      "  `${JSON.stringify({ command: process.argv[2] ?? null, error: \"未知或缺少命令\", valid: false })}\\n`,",
+      ");",
+      "process.exitCode = 1;",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  writeFileSync(
+    join(fixture.source, "skill", "references", "evaluation.md"),
+    "# Evaluation\nBaseline evaluation reference.\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(
+      fixture.source,
+      "skill",
+      "references",
+      "security-and-privacy.md",
+    ),
+    "# Security\nBaseline security reference.\n",
+    "utf8",
+  );
+  runSafeGit(fixture.source, ["add", "skill"], {
+    label: "Git branch fixture baseline",
+  });
+  runSafeGit(
+    fixture.source,
+    ["commit", "-m", "baseline skill"],
+    { label: "Git branch fixture baseline" },
+  );
+  const baselineSkillFingerprint = fingerprintTree(
+    join(fixture.source, "skill"),
+  );
+  const baselineSkillFileCount = countTreeFiles(
+    join(fixture.source, "skill"),
+  );
+  const baselineSkillHash = createHash("sha256")
+    .update(readFileSync(join(fixture.source, "skill", "SKILL.md")))
+    .digest("hex");
   const installedFingerprint = fingerprintTree(fixture.installed);
   const {
     snapshot: repositorySnapshot,
@@ -1352,7 +1508,9 @@ export function createBranchPushFixture({
     "---\nname: decoy-skill\n---\nsource\nbranch push\n",
     "utf8",
   );
-  mkdirSync(join(isolated.candidate_path, "skill"));
+  mkdirSync(join(isolated.candidate_path, "skill"), {
+    recursive: true,
+  });
   writeFileSync(
     join(isolated.candidate_path, "skill", "SKILL.md"),
     "---\nname: example-skill\n---\nbranch push skill\n",
@@ -1435,9 +1593,9 @@ export function createBranchPushFixture({
     join(isolated.candidate_path, "skill"),
   );
   fixtureDocument.runtime_bundle.baseline_tree_fingerprint =
-    candidateSkillFingerprint;
+    baselineSkillFingerprint;
   fixtureDocument.runtime_bundle.baseline_file_count =
-    fixtureDocument.runtime_bundle.candidate_file_count;
+    baselineSkillFileCount;
   fixtureDocument.quality_thresholds
     .candidate_minimum_gain_over_baseline = 0;
   const skillHash = createHash("sha256")
@@ -1447,7 +1605,7 @@ export function createBranchPushFixture({
     .digest("hex");
   fixtureDocument.target_files = {
     paths: ["SKILL.md"],
-    baseline_sha256: { "SKILL.md": skillHash },
+    baseline_sha256: { "SKILL.md": baselineSkillHash },
     candidate_sha256: { "SKILL.md": skillHash },
   };
   mkdirSync(join(isolated.candidate_path, "evals", "cases"), {
