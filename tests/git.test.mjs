@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -22,11 +24,14 @@ import {
   buildReleaseChangeInventory,
   buildRepositorySnapshot,
   createIsolatedCandidate,
+  countTreeFiles,
   evaluateReleaseNoteCoverage,
   fingerprintCandidatePath,
   fingerprintTree,
+  inspectCandidateCommitTree,
   isCommitAncestor,
   pushGithubBranch,
+  readCandidateRegularFile,
   readGithubRemoteBranch,
   validateBranchPushCandidate,
   validateCandidateProcessArtifacts,
@@ -53,6 +58,99 @@ import {
   runGit,
   sourceApproval,
 } from "./fixtures.mjs";
+
+test("candidate evidence reads reject symlinks before content hashing", () => {
+  const root = mkdtempSync(join(tmpdir(), "maintainer-safe-read-"));
+  const outsideRoot = mkdtempSync(
+    join(tmpdir(), "maintainer-safe-read-outside-"),
+  );
+  try {
+    const outside = join(outsideRoot, "outside.txt");
+    writeFileSync(outside, "outside\n", "utf8");
+    symlinkSync(outside, join(root, "outside-link"));
+    assert.throws(
+      () => readCandidateRegularFile(root, "outside-link"),
+      /symlink|逃逸/u,
+    );
+    writeFileSync(join(root, "target.txt"), "target\n", "utf8");
+    symlinkSync("target.txt", join(root, "inside-link"));
+    assert.throws(
+      () => readCandidateRegularFile(root, "inside-link"),
+      /symlink/u,
+    );
+    assert.equal(
+      readCandidateRegularFile(root, "target.txt").toString("utf8"),
+      "target\n",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test(
+  "Skill tree identity includes executable mode and tracked node_modules",
+  {
+    skip:
+      process.platform === "win32"
+        ? "Windows filesystems do not expose POSIX executable mode"
+        : false,
+  },
+  () => {
+  const root = mkdtempSync(join(tmpdir(), "maintainer-tree-identity-"));
+  try {
+    initializeRepository(root);
+    const original = fingerprintTree(root);
+    chmodSync(join(root, "SKILL.md"), 0o755);
+    const executable = fingerprintTree(root);
+    assert.notEqual(executable, original);
+    runGit(root, "add", "SKILL.md");
+    runGit(root, "commit", "-m", "make executable");
+    assert.equal(
+      inspectCandidateCommitTree(root, runGit(root, "rev-parse", "HEAD"), ".")
+        .fingerprint,
+      executable,
+    );
+
+    mkdirSync(join(root, "node_modules", "forced"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(root, "node_modules", "forced", "runtime.mjs"),
+      "export default 1;\n",
+      "utf8",
+    );
+    const withDependency = fingerprintTree(root);
+    assert.notEqual(withDependency, executable);
+    assert.equal(countTreeFiles(root), 2);
+    runGit(root, "add", "-f", "node_modules/forced/runtime.mjs");
+    runGit(root, "commit", "-m", "track runtime dependency");
+    const committed = inspectCandidateCommitTree(
+      root,
+      runGit(root, "rev-parse", "HEAD"),
+      ".",
+    );
+    assert.equal(committed.fingerprint, withDependency);
+    assert.equal(committed.file_count, 2);
+
+    mkdirSync(join(root, "a"), { recursive: true });
+    writeFileSync(join(root, "a", "x"), "nested\n", "utf8");
+    writeFileSync(join(root, "a-"), "sibling\n", "utf8");
+    const crossLevel = fingerprintTree(root);
+    runGit(root, "add", "a", "a-");
+    runGit(root, "commit", "-m", "cover cross-level ordering");
+    const crossLevelCommit = inspectCandidateCommitTree(
+      root,
+      runGit(root, "rev-parse", "HEAD"),
+      ".",
+    );
+    assert.equal(crossLevelCommit.fingerprint, crossLevel);
+    assert.equal(crossLevelCommit.file_count, 4);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  },
+);
 
 const DOCUMENTATION_IMPACT = {
   schema_version: 1,
@@ -246,7 +344,10 @@ test("isolated candidate preserves source and starts clean", () => {
       runGit(fixture.source, "branch", "--show-current"),
       sourceBranch,
     );
-    assert.equal(readFileSync(join(fixture.source, "SKILL.md"), "utf8"), "source\n");
+    assert.equal(
+      readFileSync(join(fixture.source, "SKILL.md"), "utf8"),
+      "---\nname: example-skill\n---\nsource\n",
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -392,31 +493,62 @@ test("candidate snapshot hashes tracked and untracked changes with OPT mapping",
       optimizations: [optimization],
       approval,
     });
-    writeFileSync(join(result.candidate_path, "SKILL.md"), "improved\n", "utf8");
+    writeFileSync(
+      join(result.candidate_path, "SKILL.md"),
+      "---\nname: example-skill\n---\nimproved\n",
+      "utf8",
+    );
     mkdirSync(join(result.candidate_path, "tests"));
     writeFileSync(
       join(result.candidate_path, "tests", "regression.txt"),
       "regression\n",
       "utf8",
     );
+    const evaluationFixturePath =
+      "evals/cases/evaluation-binding-heldout.json";
+    mkdirSync(join(result.candidate_path, "evals", "cases"), {
+      recursive: true,
+    });
+    const evaluationFixtureContent = '{"schema_version":1}\n';
+    writeFileSync(
+      join(result.candidate_path, evaluationFixturePath),
+      evaluationFixtureContent,
+      "utf8",
+    );
     const mapping = {
       "SKILL.md": ["OPT-001"],
+      [evaluationFixturePath]: ["OPT-001"],
       "tests/regression.txt": ["OPT-001"],
     };
     const snapshot = buildCandidateSnapshot({
       candidatePath: result.candidate_path,
       installedPath: fixture.installed,
       sourcePath: fixture.source,
+      skillPath: ".",
+      targetSkill: "example-skill",
+      targetSkillPath: ".",
+      evaluationFixturePath,
       baseRef: "main",
       approvedOptIds: ["OPT-001"],
       fileOptMap: mapping,
     });
     assert.deepEqual(snapshot.changed_files, [
       "SKILL.md",
+      evaluationFixturePath,
       "tests/regression.txt",
     ]);
     assert.deepEqual(snapshot.file_opt_map, mapping);
     assert.equal(snapshot.candidate_diff_hash.length, 64);
+    assert.equal(
+      snapshot.evaluation_fixture_path,
+      evaluationFixturePath,
+    );
+    assert.equal(
+      snapshot.evaluation_fixture_sha256,
+      createHash("sha256")
+        .update(evaluationFixtureContent)
+        .digest("hex"),
+    );
     writeFileSync(
       join(result.candidate_path, "tests", "regression.txt"),
       "changed\n",
@@ -426,6 +558,10 @@ test("candidate snapshot hashes tracked and untracked changes with OPT mapping",
       candidatePath: result.candidate_path,
       installedPath: fixture.installed,
       sourcePath: fixture.source,
+      skillPath: ".",
+      targetSkill: "example-skill",
+      targetSkillPath: ".",
+      evaluationFixturePath,
       baseRef: "main",
       approvedOptIds: ["OPT-001"],
       fileOptMap: mapping,
@@ -461,11 +597,18 @@ test("candidate snapshot rejects missing and unknown OPT mappings", () => {
       optimizations: [optimization],
       approval,
     });
-    writeFileSync(join(result.candidate_path, "SKILL.md"), "improved\n", "utf8");
+    writeFileSync(
+      join(result.candidate_path, "SKILL.md"),
+      "---\nname: example-skill\n---\nimproved\n",
+      "utf8",
+    );
     const common = {
       candidatePath: result.candidate_path,
       installedPath: fixture.installed,
       sourcePath: fixture.source,
+      skillPath: ".",
+      targetSkill: "example-skill",
+      targetSkillPath: ".",
       baseRef: "main",
       approvedOptIds: ["OPT-001"],
     };
@@ -595,6 +738,20 @@ test("branch push candidate preflight requires the exact clean committed candida
         ),
       /過程檔/u,
     );
+    const driftedSkill = structuredClone(fixture.candidateSnapshot);
+    driftedSkill.candidate_skill_fingerprint = "f".repeat(64);
+    assert.throws(
+      () =>
+        validateBranchPushCandidate(
+          fixture.candidate,
+          driftedSkill,
+          {
+            candidatePathFingerprint,
+            branch: fixture.branch,
+          },
+        ),
+      /Skill fingerprint/u,
+    );
     writeFileSync(
       join(fixture.candidate, "SKILL.md"),
       "source\nbranch push\ndirty\n",
@@ -611,6 +768,100 @@ test("branch push candidate preflight requires the exact clean committed candida
           },
         ),
       /必須先提交/u,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("branch push binds hidden working changes to immutable HEAD content", () => {
+  for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
+    const fixture = createBranchPushFixture({
+      prefix: `maintainer-hidden-index-${flag.slice(2)}-`,
+    });
+    try {
+      runGit(
+        fixture.candidate,
+        "update-index",
+        flag,
+        "skill/SKILL.md",
+      );
+      writeFileSync(
+        join(fixture.candidate, "skill", "SKILL.md"),
+        "---\nname: example-skill\n---\nworking tree differs from HEAD\n",
+        "utf8",
+      );
+      assert.equal(
+        runGit(fixture.candidate, "status", "--porcelain"),
+        "",
+      );
+      const hiddenSnapshot = buildCandidateSnapshot({
+        candidatePath: fixture.candidate,
+        installedPath: fixture.installed,
+        sourcePath: fixture.source,
+        skillPath: "skill",
+        targetSkill: "example-skill",
+        targetSkillPath: "skill",
+        evaluationFixturePath:
+          "evals/cases/evaluation-binding-heldout.json",
+        baseRef: "main",
+        approvedOptIds: ["OPT-001"],
+        fileOptMap: fixture.candidateSnapshot.file_opt_map,
+      });
+      assert.throws(
+        () =>
+          validateBranchPushCandidate(
+            fixture.candidate,
+            hiddenSnapshot,
+            {
+              candidatePathFingerprint: fingerprintCandidatePath(
+                fixture.candidate,
+              ),
+              branch: fixture.branch,
+            },
+          ),
+        /HEAD Skill fingerprint/u,
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("candidate snapshot rejects a decoy Skill path or frontmatter name", () => {
+  const fixture = createBranchPushFixture({
+    prefix: "maintainer-decoy-skill-",
+  });
+  try {
+    const common = {
+      candidatePath: fixture.candidate,
+      installedPath: fixture.installed,
+      sourcePath: fixture.source,
+      evaluationFixturePath:
+        "evals/cases/evaluation-binding-heldout.json",
+      baseRef: "main",
+      approvedOptIds: ["OPT-001"],
+      fileOptMap: fixture.candidateSnapshot.file_opt_map,
+    };
+    assert.throws(
+      () =>
+        buildCandidateSnapshot({
+          ...common,
+          skillPath: ".",
+          targetSkill: "example-skill",
+          targetSkillPath: "skill",
+        }),
+      /已確認 target/u,
+    );
+    assert.throws(
+      () =>
+        buildCandidateSnapshot({
+          ...common,
+          skillPath: "skill",
+          targetSkill: "different-skill",
+          targetSkillPath: "skill",
+        }),
+      /SKILL.md name/u,
     );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -1806,6 +2057,7 @@ test("branch push reconcile proves applied and exact not-applied remote states",
       return identityRunner(arguments_, options);
     };
     const applied = reconcileGithubAction(preview, {
+      approvalFingerprint: "d".repeat(64),
       runner,
       gitRunner: (repository, arguments_) => {
         assert.equal(arguments_[0], "ls-remote");
@@ -2527,6 +2779,7 @@ test("contribute PR apply and reconcile accept the confirmed account fork", () =
   );
 
   const recovered = reconcileGithubAction(preview, {
+    approvalFingerprint: approval.fingerprint,
     documentationImpact: DOCUMENTATION_IMPACT,
     runner: (arguments_) => {
       assert.deepEqual(arguments_.slice(0, 2), ["pr", "list"]);
@@ -2659,6 +2912,7 @@ test("PR create reconcile blocks metadata drift and recovers a REST identity mat
 
   let readCount = 0;
   const recovered = reconcileGithubAction(preview, {
+    approvalFingerprint: "d".repeat(64),
     documentationImpact: DOCUMENTATION_IMPACT,
     runner: (arguments_) => {
       readCount += 1;

@@ -52,6 +52,8 @@ description: New fixture.
 # New
 `;
 const NEW_GUIDE = "# Guide\n";
+const CROSS_LEVEL_ROOT = "sibling\n";
+const CROSS_LEVEL_CHILD = "nested\n";
 
 /** Computes one Git object identifier for a blob fixture. */
 function blobSha(payload) {
@@ -182,6 +184,8 @@ function createUpdateFixture({
   const blobs = new Map([
     [blobSha(NEW_SKILL), NEW_SKILL],
     [blobSha(NEW_GUIDE), NEW_GUIDE],
+    [blobSha(CROSS_LEVEL_ROOT), CROSS_LEVEL_ROOT],
+    [blobSha(CROSS_LEVEL_CHILD), CROSS_LEVEL_CHILD],
   ]);
   const commands = [];
   const runner = (arguments_) => {
@@ -239,6 +243,24 @@ function createUpdateFixture({
             mode: "100644",
             type: "blob",
             sha: blobSha(NEW_GUIDE),
+          },
+          {
+            path: "skills/example-skill/a-",
+            mode: "100644",
+            type: "blob",
+            sha: blobSha(CROSS_LEVEL_ROOT),
+          },
+          {
+            path: "skills/example-skill/a",
+            mode: "040000",
+            type: "tree",
+            sha: "2".repeat(40),
+          },
+          {
+            path: "skills/example-skill/a/x",
+            mode: "100644",
+            type: "blob",
+            sha: blobSha(CROSS_LEVEL_CHILD),
           },
         ],
       });
@@ -496,6 +518,20 @@ test("approved update atomically installs the published Skill and Lock", () => {
     assert.equal(
       fingerprintTree(fixture.installed),
       result.proof.installed_fingerprint,
+    );
+    const expected = createHash("sha256");
+    for (const [path, payload] of [
+      ["SKILL.md", NEW_SKILL],
+      ["a-", CROSS_LEVEL_ROOT],
+      ["a/x", CROSS_LEVEL_CHILD],
+      ["references/guide.md", NEW_GUIDE],
+    ]) {
+      expected.update(`100644\0${path}\0`, "utf8");
+      expected.update(createHash("sha256").update(payload).digest());
+    }
+    assert.equal(
+      result.proof.installed_fingerprint,
+      expected.digest("hex"),
     );
   } finally {
     fixture.cleanup();
@@ -1112,6 +1148,9 @@ test("CLI apply reserves once and persists the verified update proof", () => {
       schema_version: 1,
       repository_snapshot: repositorySnapshot,
       candidate_diff_hash: "4".repeat(64),
+      skill_path: ".",
+      skill_name: "example-skill",
+      candidate_skill_fingerprint: "5".repeat(64),
       changed_files: ["SKILL.md"],
       approved_opt_ids: ["OPT-001"],
       process_artifact_prefixes: ["docs/plans/"],
@@ -1132,6 +1171,7 @@ test("CLI apply reserves once and persists the verified update proof", () => {
         status: "active",
         target: {
           skill: "example-skill",
+          skill_path: ".",
           repository: "example/skill",
         },
         approvals: [],

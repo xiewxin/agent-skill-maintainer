@@ -120,7 +120,8 @@ Skill 也提供本機確定性 CLI：
 
 ```bash
 node skills/agent-skill-maintainer/scripts/maintainer.mjs start \
-  --run-id run-001 --binding-id binding-001 --skill example-skill
+  --run-id run-001 --binding-id binding-001 --skill example-skill \
+  --skill-path skills/example-skill
 node skills/agent-skill-maintainer/scripts/maintainer.mjs status \
   --run-id run-001
 node skills/agent-skill-maintainer/scripts/maintainer.mjs validate \
@@ -169,6 +170,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-approve \
 node skills/agent-skill-maintainer/scripts/maintainer.mjs transition \
   --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
   --phase branch_push --updates branch-transition-updates.json \
+  --candidate "$CANDIDATE" \
   > branch-run.json
 node skills/agent-skill-maintainer/scripts/maintainer.mjs github-apply \
   --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
@@ -196,7 +198,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs publication-continue \
   --binding-id "$BINDING_ID" --merge-proof merge-proof.json
 ```
 
-對遷移後的 pre-v8 `legacy_completed` run，這也是唯一支援的恢復路徑。命令會先要求既有 candidate、validation 與 PR proof 完整，再唯讀重查已合併 PR，逐項比對 repository、number、base、candidate head、merge commit 與獨立 merge proof。恢復時只在記憶體遷移來源，不改寫該 terminal 審計紀錄；新的 continuation 會記錄 source-state、merge-proof 與 live-verification 指紋。任一不一致都在建立 continuation run 或 lease 前停止，不重做 merge 或其他遠端寫入。
+對遷移後的 pre-v8 `legacy_completed` run，這也是唯一支援的恢復路徑。命令會先要求既有 candidate、validation 與 PR proof 完整，再唯讀重查已合併 PR，逐項比對 repository、number、base、candidate head、merge commit 與獨立 merge proof；同時分頁取得最新 PR 完整 changed-file 清單，要求其正規化集合與歷史 snapshot 完全一致後，才會信任任何舊路徑。若歷史 state 缺少 Skill 名稱／路徑，會從這份已驗證的遠端集合與最新 merge commit tree 讀取變更的 `SKILL.md` blob，要求只有一個 frontmatter name 與既有 target 相符，再從同一 commit 重算完整目標 Skill 子樹的 fingerprint 與 file count。恢復時只在記憶體遷移來源，不改寫該 terminal 審計紀錄；唯讀 `status` 也不會持久化 migration。新的 continuation 會記錄綁定該 merge commit 的 source-state、merge-proof、remote-file、candidate-identity 與 live-verification 指紋。身份缺失、超限、歧義或任一不一致都在建立 continuation run 或 lease 前停止，不重做 merge 或其他遠端寫入。
 
 正式發布 proof 已存在後，支援的本機更新也使用獨立預覽、approval、生命週期 transition、apply 與唯讀 reconcile：
 
@@ -246,7 +248,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-reconcile \
 
 只有同一已核准 transaction 已把精確 candidate 移入 quarantine 時，才可使用 `cleanup-reconcile --finish true`。第一版不清理 run state、原始評測、source clone、父目錄、相鄰 candidate、aborted run 或 stop-after-PR candidate。
 
-盲測評分現在分為三份公開產物：解盲前 adjudication、由私有 outputs／events 重算的 measurement，以及衍生的 schema v3 aggregate。`eval-measure` 讀取私有 A／B 來源檔；`eval-adjudicate` 從私有隨機 assignment、session metadata 與 Judge output 計算 session／evidence 身分；`eval-derive` 再把兩份證據綁定到候選 Skill 指紋。原始輸出、seed 與未脫敏 Judge 證據仍只留本機。
+盲測評分透過 schema v5 私有來源 binding 衍生公開 adjudication、measurement、platform 與 aggregate 證據，不公開原始輸入。精確的 input-view、runtime、時序、平台與 replay 規則由[評測合同](skills/agent-skill-maintainer/references/evaluation.md)維護；發布與 reconciliation 邊界由[生命週期合同](skills/agent-skill-maintainer/references/repository-and-lifecycle.md)維護。
 
 請在確認後把兩個時間變數設為新的 ISO 8601 時間，且有效期限應保持短暫。每份 transition updates 文件都必須包含目前已通過的 `validation_summary`、綁定 capability proof 的精確 `action_preview` 及其 approval 陣列；貢獻者 branch 或 `publish_pr` 動作還要帶入相符 `fork_proof`。生命週期會先驗證這些文件，再消費 approval。
 
@@ -265,7 +267,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-reconcile \
 - installed／source 指紋檢查與確定性隔離 clone 候選；
 - 完整候選 Diff hash 與檔案到 `OPT-*` 的映射；
 - 安全、回歸、文件影響及可量測增益 gate；
-- 隨機 A／B、獨立 Judge session、逐 behavior verdict 證據、本機重算客觀 measurement，以及由兩份證據衍生的 schema v3 aggregate；
+- 隨機 A／B、獨立 Judge session、完整 evaluation-input commitment、逐 behavior verdict 證據、私有來源與 Judge 後平台綁定、本機重算 measurement，以及 schema v5 aggregate；
 - 獨立確認的 candidate cleanup，保留 source-run bytes、attempt-first quarantine、manifest 驗證、proof 與中斷 reconcile；
 - 唯讀複用或經獨立確認、僅嘗試一次的 active account 個人 Fork 建立，並檢查 owner、parent、權限、base commit、pending、blocked 與 drift；
 - 管理者倉庫與已驗證既存貢獻者 Fork 的乾淨候選分支建立／快進／已套用驗證，綁定精確 commit 與遠端前態，不替換歷史、不讀取候選本機傳輸設定，也不修改候選 remote；
@@ -301,6 +303,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-reconcile \
 穩定版合同只處理 GitHub 倉庫與 Agent Skills。GitLab、Bitbucket、背景掃描、永久授權、自動合併及自動發布不在範圍內。
 
 候選已在隔離專案通過 Codex CLI `0.139.0` 與 Claude Code `2.1.220` 的安裝、正向觸發、負向不觸發、Provider 選擇、產物橋接、fallback、穩定 ID、決策邊界及零檔案修改檢查。
+
+簽署 neutral evaluator 證據需要 Node.js 能從檔案系統驗證外部私鑰是 owner-only regular file。控制器在 Windows 會 fail closed，不會放寬這項要求；因此 Windows CI 執行可攜式合同子集與明確的私鑰拒絕檢查，排除依賴簽署 evaluator 的案例，以及載入模組時就物化這類 fixture 的 state 測試；Ubuntu 與 macOS 則執行完整套件。
 
 正式命令合同固定為 Superpowers `v6.2.0`、Spec Kit `v0.14.2`、OpenSpec `v1.6.0`、BMAD Method `v6.10.0` 與 Matt Pocock Skills `v1.1.0`。只有 Profile allowlist 內的命令可以使用，且必須同時存在具體能力缺口、唯一產物 owner、精確版本偵測，並對副作用另行確認。已封存的 GSD `v1.42.3` 保留為 legacy，永不授權命令。未知版本仍只允許唯讀相容，未安裝則標示 unavailable。
 

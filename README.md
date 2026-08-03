@@ -119,13 +119,19 @@ Specify the target Skill when known. Without one, the maintainer may show only c
 The Skill also exposes a local deterministic CLI:
 
 ```bash
+node skills/agent-skill-maintainer/scripts/maintainer.mjs help
+node skills/agent-skill-maintainer/scripts/maintainer.mjs help \
+  --command github-preview
 node skills/agent-skill-maintainer/scripts/maintainer.mjs start \
-  --run-id run-001 --binding-id binding-001 --skill example-skill
+  --run-id run-001 --binding-id binding-001 --skill example-skill \
+  --skill-path skills/example-skill
 node skills/agent-skill-maintainer/scripts/maintainer.mjs status \
   --run-id run-001
 node skills/agent-skill-maintainer/scripts/maintainer.mjs validate \
   --schema evidence --input evidence.json
 ```
+
+The structured help registry is the sole command and argument index. It labels side effects and natural-language eligibility. Natural-language routing belongs to the Skill layer, not the CLI parser: an unambiguous read-only request may run directly and a side-effecting request may reach only its safest preview. Approval, apply, merge, Release, installed-copy mutation, and candidate deletion always require their exact confirmation path. The entire command surface is restricted to maintenance of one selected Agent Skill; it is not a general codebase, repository-publication, or workflow-orchestration interface.
 
 State defaults to `~/.agent-skill-maintainer`. Use `--state-root` to select an isolated location. These commands do not execute Provider commands.
 
@@ -169,6 +175,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs github-approve \
 node skills/agent-skill-maintainer/scripts/maintainer.mjs transition \
   --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
   --phase branch_push --updates branch-transition-updates.json \
+  --candidate "$CANDIDATE" \
   > branch-run.json
 node skills/agent-skill-maintainer/scripts/maintainer.mjs github-apply \
   --state-root "$STATE_ROOT" --run-id "$RUN_ID" \
@@ -196,7 +203,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs publication-continue \
   --binding-id "$BINDING_ID" --merge-proof merge-proof.json
 ```
 
-For a migrated pre-v8 `legacy_completed` run, this command is also the only supported recovery path. It first requires the persisted candidate, validation, and PR proof, then re-reads the merged PR and compares its repository, number, base, candidate head, and merge commit with the detached proof. Recovery migrates the source only in memory and leaves that terminal audit record unchanged; the new continuation records source-state, merge-proof, and live-verification fingerprints. Any mismatch stops before a continuation run or lease is created; no merge or other remote write is repeated.
+For a migrated pre-v8 `legacy_completed` run, this command is also the only supported recovery path. It first requires the persisted candidate, validation, and PR proof, then re-reads the merged PR and compares its repository, number, base, candidate head, and merge commit with the detached proof. It also paginates the live PR changed-file API and requires that complete canonical set to equal the persisted snapshot before trusting any historical path. If the historical state lacks Skill name/path fields, it reads changed `SKILL.md` blobs from that verified remote set and freshly observed merge commit tree, requires one unique frontmatter name matching the persisted target, and recomputes the complete matching remote Skill subtree fingerprint and file count. Recovery migrates the source only in memory and leaves that terminal audit record unchanged; read-only `status` never persists a migration. The new continuation records source-state, merge-proof, remote-file, candidate-identity, and live-verification fingerprints bound to that merge commit. Any missing, oversized, or ambiguous identity and every other mismatch stop before a continuation run or lease is created; no merge or other remote write is repeated.
 
 After an official publication proof exists, a supported local update uses its own preview, approval, lifecycle transition, apply, and read-only reconcile:
 
@@ -246,7 +253,7 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-reconcile \
 
 `cleanup-reconcile --finish true` is allowed only when that same approved transaction already quarantined the exact candidate. The first version cleans no run state, raw evaluation, source clone, parent directory, adjacent candidate, aborted run, or stop-after-PR candidate.
 
-Blinded scoring now has three public artifacts: pre-unblind adjudication, measurement recomputed from private outputs and events, and a derived schema v3 aggregate. `eval-measure` reads the private A／B source files; `eval-adjudicate` computes session and evidence identities from the private randomized assignment, session metadata, and Judge output; `eval-derive` binds both documents to the candidate Skill fingerprint. Raw outputs, the seed, and unredacted Judge evidence remain local.
+Blinded scoring uses a schema v5 private-source binding to derive public adjudication, measurement, platform, and aggregate evidence without publishing raw inputs. See the [evaluation contract](skills/agent-skill-maintainer/references/evaluation.md) for exact input-view, runtime, timing, platform, and replay rules, and the [lifecycle contract](skills/agent-skill-maintainer/references/repository-and-lifecycle.md) for publication and reconciliation boundaries.
 
 Set both time variables to fresh ISO 8601 timestamps after confirmation; the expiry should be short-lived. Each transition-updates document must contain the current passed `validation_summary`, exact capability-bound `action_preview`, and its approval array; contributor branch or `publish_pr` actions also include the bound `fork_proof`. The lifecycle validates these documents before consuming the approval.
 
@@ -265,7 +272,7 @@ Available and tested locally:
 - installed/source fingerprint checks and deterministic isolated-clone candidates;
 - complete candidate Diff hashing and file-to-`OPT-*` mapping;
 - validation gates for safety, regression, documentation impact, and measurable gain;
-- randomized A／B adjudication with a distinct Judge session, per-behavior verdict evidence, locally recomputed objective measurement, and a schema v3 aggregate derived from both evidence documents;
+- randomized A／B adjudication with a distinct Judge session, full evaluation-input commitment, per-behavior verdict evidence, private-source and post-Judge platform binding, locally recomputed objective measurement, and a schema v5 aggregate;
 - separately confirmed candidate cleanup with immutable source-run bytes, attempt-first quarantine, manifest validation, proof, and interrupted-attempt reconciliation;
 - read-only reuse or separately confirmed single-attempt creation of the active account's personal Fork, with owner, parent, permission, base-commit, pending, blocked, and drift checks;
 - clean-candidate branch creation／fast-forward／already-applied verification for managed repositories and verified existing contributor forks, with exact commit and remote-prestate binding and without history replacement, candidate-local transport configuration, or candidate-remote mutation;
@@ -301,6 +308,8 @@ Intentionally unsupported in this version:
 The stable contract targets GitHub repositories and Agent Skills. GitLab, Bitbucket, autonomous background scans, permanent authorization, automatic merging, and automatic release are out of scope.
 
 The candidate passed isolated project installation, positive triggering, negative non-triggering, Provider selection, artifact bridging, fallback, stable-ID, decision-boundary, and no-file-mutation checks on Codex CLI `0.139.0` and Claude Code `2.1.220`.
+
+Signed neutral-evaluator evidence generation requires a filesystem where Node.js can verify owner-only regular-file permissions for the external private key. The controller fails closed on Windows instead of weakening that requirement. Windows CI therefore runs the portable contract subset plus an explicit private-key rejection check, excluding signed-evaluator cases and state fixtures that materialize them at module load; Ubuntu and macOS run the complete suite.
 
 Formal command-scoped Profiles are fixed to Superpowers `v6.2.0`, Spec Kit `v0.14.2`, OpenSpec `v1.6.0`, BMAD Method `v6.10.0`, and Matt Pocock Skills `v1.1.0`. Only each Profile's allowlisted commands may be used, and only after a concrete capability gap, unique artifact owner, exact-version detection, and separate confirmation of side effects. The archived GSD `v1.42.3` remains legacy and command-disabled. Unknown versions remain read-only; missing Providers are unavailable.
 

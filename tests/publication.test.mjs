@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +15,9 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
+  publicTextFiles,
+  validateMarkdownRelativeLinks,
+  validateNeutralControllerSource,
   validatePublication,
   validateStructuredAssets,
   validateTrackedProcessArtifacts,
@@ -20,6 +25,7 @@ import {
 import {
   validateForkForwardAggregate,
   validateForkForwardFixture,
+  deriveBlindedForwardAggregate,
   validateForwardEvaluationAggregate,
   validateForwardEvaluationFixture,
   validateHeldoutForwardFixture,
@@ -37,11 +43,21 @@ import {
   transitionRun,
 } from "../skills/agent-skill-maintainer/scripts/lib/state.mjs";
 import {
+  fingerprintTree,
+} from "../skills/agent-skill-maintainer/scripts/lib/git.mjs";
+import {
+  COMMAND_REGISTRY,
   runMaintainerCommand,
 } from "../skills/agent-skill-maintainer/scripts/maintainer.mjs";
 import {
   branchPushGithubRunner,
+  candidateFixture,
+  codexTranscript,
   createBranchPushFixture,
+  evaluationTranscriptTools,
+  FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
+  forwardEvaluationBindingFixture,
+  forwardEvaluationRepositorySnapshot,
   githubCapability,
   initializeRepository,
   localRemoteGitRunner,
@@ -105,6 +121,10 @@ function createCliBranchPushFixture({ relationship = "managed" } = {}) {
         category: "forward",
         status: "passed",
         summary: "Forward contracts passed.",
+        details: forwardEvaluationBindingFixture(
+          fixture.candidateSnapshot,
+          fixture.candidate,
+        ),
       },
       {
         id: "quality",
@@ -143,6 +163,7 @@ function prepareCliValidationRun(fixture) {
     bindingId: "binding-001",
     target: {
       skill: "example-skill",
+      skill_path: "skill",
       repository: "example/skill",
     },
   });
@@ -181,6 +202,7 @@ function prepareCliBranchPushAction(
       fixture.binding.relationship === "managed"
         ? "example/skill"
         : "contributor/skill",
+    transition = true,
   } = {},
 ) {
   const stateRoot = prepareCliValidationRun(fixture);
@@ -265,17 +287,21 @@ function prepareCliBranchPushAction(
     })}\n`,
     "utf8",
   );
-  const transitioned = runMaintainerCommand([
-    "transition",
-    "--state-root",
-    stateRoot,
-    "--run-id",
-    "run-001",
-    "--phase",
-    "branch_push",
-    "--updates",
-    updatesPath,
-  ]);
+  const transitioned = transition
+    ? runMaintainerCommand([
+        "transition",
+        "--state-root",
+        stateRoot,
+        "--run-id",
+        "run-001",
+        "--phase",
+        "branch_push",
+        "--updates",
+        updatesPath,
+        "--candidate",
+        fixture.candidate,
+      ])
+    : null;
   return {
     stateRoot,
     state,
@@ -284,6 +310,7 @@ function prepareCliBranchPushAction(
     actionStatePath,
     previewPath,
     approvalPath,
+    updatesPath,
     transitioned,
   };
 }
@@ -514,9 +541,11 @@ test("required public files and maintainer guidance exist", () => {
     ".agents/adr/0004-deterministic-local-skill-update.md",
     ".agents/adr/0008-transactional-candidate-cleanup.md",
     ".agents/adr/0009-traceable-blinded-adjudication.md",
+    ".agents/adr/0010-bound-legacy-remote-skill-identity.md",
+    ".agents/adr/0011-exact-private-evaluation-binding.md",
     "evals/cases/sample-cleanup-forward.json",
     "evals/cases/archive-release-resumption-heldout.json",
-    "evals/cases/candidate-cleanup-scoring-heldout.json",
+    "evals/cases/evaluation-binding-heldout.json",
     "evals/cases/fork-creation-forward.json",
     "evals/cases/local-update-forward.json",
   ];
@@ -532,6 +561,21 @@ test("required public files and maintainer guidance exist", () => {
     [],
   );
   assert.equal(read(".gitattributes").trim(), "* text=auto eol=lf");
+  assert.deepEqual(validateMarkdownRelativeLinks(), []);
+  assert.deepEqual(
+    validateMarkdownRelativeLinks([
+      {
+        path: resolve(ROOT, "AGENTS.md"),
+        relativePath: "AGENTS.md",
+        content:
+          "[missing](.agents/adr/9999-missing.md) [external](https://example.com)",
+        symlink: false,
+      },
+    ]),
+    [
+      "missing Markdown link target: AGENTS.md: .agents/adr/9999-missing.md",
+    ],
+  );
   const rootGuidance = read("AGENTS.md");
   for (const relativePath of [
     ".agents/architecture.md",
@@ -669,6 +713,14 @@ test("Skill metadata, trigger cases, references, and stable boundary remain comp
   );
   assert.ok(metadata.includes('display_name: "Agent Skill Maintainer"'));
   assert.ok(metadata.includes("$agent-skill-maintainer"));
+  const adjudicationAdr = read(
+    ".agents/adr/0011-exact-private-evaluation-binding.md",
+  );
+  assert.ok(
+    adjudicationAdr.includes(
+      "Preserve the stable controller as authority",
+    ),
+  );
 });
 
 test("isolation reference requires non-executing Git materialization", () => {
@@ -686,6 +738,82 @@ test("isolation reference requires non-executing Git materialization", () => {
   ]) {
     assert.ok(content.includes(phrase), `reference missing: ${phrase}`);
   }
+});
+
+test("CLI help is complete, scoped to Skill maintenance, and side-effect aware", () => {
+  const help = runNode(CLI, "--help");
+  assert.equal(help.status, 0, help.stderr);
+  const document = JSON.parse(help.stdout);
+  assert.equal(
+    document.capability_scope,
+    "selected-agent-skill-maintenance-only",
+  );
+  assert.equal(document.command_count, 25);
+  assert.equal(document.commands.length, 25);
+  assert.deepEqual(
+    document.non_goals,
+    [
+      "general-codebase-maintenance",
+      "general-repository-publication",
+      "arbitrary-workflow-orchestration",
+    ],
+  );
+  const names = document.commands.map((command) => command.name);
+  assert.equal(new Set(names).size, names.length);
+  assert.deepEqual(
+    [...names].sort(),
+    Object.keys(COMMAND_REGISTRY).sort(),
+  );
+  const dispatcherNames = [
+    ...read("skills/agent-skill-maintainer/scripts/maintainer.mjs")
+      .matchAll(/if \(command === "([^"]+)"\)/gu),
+  ].map((match) => match[1]);
+  assert.deepEqual(
+    [...dispatcherNames].sort(),
+    Object.keys(COMMAND_REGISTRY).sort(),
+  );
+  for (const command of document.commands) {
+    assert.ok(command.summary.length > 0);
+    assert.ok(
+      [
+        "direct-read-only",
+        "direct-preview",
+        "explicit-confirmation-only",
+      ].includes(command.natural_language_policy),
+    );
+    if (command.side_effect !== "none") {
+      assert.notEqual(
+        command.natural_language_policy,
+        "direct-read-only",
+      );
+    }
+  }
+  for (const name of [
+    "github-apply",
+    "update-apply",
+    "cleanup-apply",
+    "cleanup-reconcile",
+  ]) {
+    assert.equal(
+      document.commands.find((command) => command.name === name)
+        .natural_language_policy,
+      "explicit-confirmation-only",
+    );
+  }
+
+  const single = runNode(
+    CLI,
+    "help",
+    "--command",
+    "github-preview",
+  );
+  assert.equal(single.status, 0, single.stderr);
+  const singleDocument = JSON.parse(single.stdout);
+  assert.equal(singleDocument.command_count, 1);
+  assert.equal(
+    singleDocument.commands[0].natural_language_policy,
+    "direct-preview",
+  );
 });
 
 test("CLI target, state recovery, and schema validation are machine-readable", () => {
@@ -710,6 +838,8 @@ test("CLI target, state recovery, and schema validation are machine-readable", (
       "binding-001",
       "--skill",
       "example-skill",
+      "--skill-path",
+      "skill",
       "--repository",
       "example/skill",
     );
@@ -717,6 +847,7 @@ test("CLI target, state recovery, and schema validation are machine-readable", (
     const started = JSON.parse(start.stdout);
     assert.equal(started.phase, "target_selection");
     assert.equal(started.target.skill, "example-skill");
+    assert.equal(started.target.skill_path, "skill");
 
     const status = runNode(
       CLI,
@@ -728,6 +859,38 @@ test("CLI target, state recovery, and schema validation are machine-readable", (
     );
     assert.equal(status.status, 0, status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), started);
+
+    const legacyStatePath = resolve(
+      stateRoot,
+      "runs",
+      "legacy-status",
+      "state.json",
+    );
+    mkdirSync(resolve(legacyStatePath, ".."), { recursive: true });
+    const legacyStateBytes = `${JSON.stringify({
+      schema_version: 1,
+      run_id: "legacy-status",
+      binding_id: "binding-legacy",
+      phase: "completed",
+      status: "completed",
+      target: { skill: "example-skill" },
+      approvals: [],
+    })}\n`;
+    writeFileSync(legacyStatePath, legacyStateBytes, "utf8");
+    const legacyStatus = runNode(
+      CLI,
+      "status",
+      "--state-root",
+      stateRoot,
+      "--run-id",
+      "legacy-status",
+    );
+    assert.equal(legacyStatus.status, 0, legacyStatus.stderr);
+    assert.equal(JSON.parse(legacyStatus.stdout).schema_version, 8);
+    assert.equal(
+      readFileSync(legacyStatePath, "utf8"),
+      legacyStateBytes,
+    );
 
     const evidencePath = resolve(stateRoot, "evidence.json");
     writeFileSync(
@@ -771,6 +934,316 @@ test("CLI target, state recovery, and schema validation are machine-readable", (
     assert.ok(!invalid.stderr.includes("Traceback"));
   } finally {
     rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("CLI binds schema v5 private sources to the exact candidate Skill", () => {
+  const root = mkdtempSync(join(tmpdir(), "maintainer-eval-bind-"));
+  let privateBundle;
+  try {
+    const candidate = candidateFixture({
+      repository_snapshot: forwardEvaluationRepositorySnapshot(ROOT),
+      skill_path: "skills/agent-skill-maintainer",
+      skill_name: "agent-skill-maintainer",
+      candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+      process_artifact_prefixes:
+        FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
+    });
+    privateBundle = forwardEvaluationBindingFixture(
+      candidate,
+      ROOT,
+      { includePrivateSources: true },
+    );
+    const expectedBinding = privateBundle.binding;
+    const sources = privateBundle.sources;
+    const candidatePath = resolve(root, "candidate.json");
+    const fixturePath = resolve(root, "fixture.json");
+    const assignmentPath = resolve(root, "assignment.json");
+    const sessionsPath = resolve(root, "sessions.json");
+    const labelAOutputPath = resolve(root, "label-a-output.json");
+    const labelAEventsPath = resolve(root, "label-a-events.json");
+    const labelBOutputPath = resolve(root, "label-b-output.json");
+    const labelBEventsPath = resolve(root, "label-b-events.json");
+    const judgePath = resolve(root, "judge.json");
+    const platformPath = resolve(root, "platform.json");
+    const attestationPath = resolve(root, "attestation.json");
+    writeFileSync(
+      candidatePath,
+      `${JSON.stringify(sources.candidateSnapshot)}\n`,
+      "utf8",
+    );
+    for (const [path, document] of [
+      [fixturePath, sources.fixture],
+      [assignmentPath, sources.assignment],
+      [sessionsPath, sources.sessions],
+      [judgePath, sources.judgeOutput],
+      [platformPath, sources.platformValidationSource],
+      [attestationPath, sources.evaluatorAttestation],
+    ]) {
+      writeFileSync(path, `${JSON.stringify(document)}\n`, "utf8");
+    }
+    writeFileSync(labelAOutputPath, sources.labelA.output, "utf8");
+    writeFileSync(labelBOutputPath, sources.labelB.output, "utf8");
+    writeFileSync(labelAEventsPath, sources.labelA.events, "utf8");
+    writeFileSync(labelBEventsPath, sources.labelB.events, "utf8");
+    const result = runNode(
+      CLI,
+      "eval-bind",
+      "--candidate-snapshot",
+      candidatePath,
+      "--candidate",
+      sources.candidatePath,
+      "--fixture",
+      fixturePath,
+      "--assignment",
+      assignmentPath,
+      "--sessions",
+      sessionsPath,
+      "--label-a-output",
+      labelAOutputPath,
+      "--label-a-events",
+      labelAEventsPath,
+      "--label-b-output",
+      labelBOutputPath,
+      "--label-b-events",
+      labelBEventsPath,
+      "--judge-output",
+      judgePath,
+      "--measured-at",
+      sources.measuredAt,
+      "--unblinded-at",
+      sources.unblindedAt,
+      "--platform-validation",
+      platformPath,
+      "--evaluator-attestation",
+      attestationPath,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const binding = JSON.parse(result.stdout);
+    assert.equal(
+      binding.evidence_kind,
+      "blinded-forward-evaluation-binding",
+    );
+    assert.equal(
+      binding.candidate_skill_fingerprint,
+      candidate.candidate_skill_fingerprint,
+    );
+    assert.equal(binding.aggregate.schema_version, 5);
+
+    const forgedFixture = structuredClone(expectedBinding.fixture);
+    forgedFixture.target_files.candidate_sha256["SKILL.md"] =
+      "0".repeat(64);
+    writeFileSync(
+      fixturePath,
+      `${JSON.stringify(forgedFixture)}\n`,
+      "utf8",
+    );
+    const rejected = runNode(
+      CLI,
+      "eval-bind",
+      "--candidate-snapshot",
+      candidatePath,
+      "--candidate",
+      sources.candidatePath,
+      "--fixture",
+      fixturePath,
+      "--assignment",
+      assignmentPath,
+      "--sessions",
+      sessionsPath,
+      "--label-a-output",
+      labelAOutputPath,
+      "--label-a-events",
+      labelAEventsPath,
+      "--label-b-output",
+      labelBOutputPath,
+      "--label-b-events",
+      labelBEventsPath,
+      "--judge-output",
+      judgePath,
+      "--measured-at",
+      sources.measuredAt,
+      "--unblinded-at",
+      sources.unblindedAt,
+      "--platform-validation",
+      platformPath,
+      "--evaluator-attestation",
+      attestationPath,
+    );
+    assert.equal(rejected.status, 1);
+    assert.match(
+      rejected.stderr,
+      /binding fixture 與 live candidate fixture 不一致/u,
+    );
+  } finally {
+    privateBundle?.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("neutral controller independently rejects forbidden tools and provider substitution", () => {
+  const root = mkdtempSync(
+    join(tmpdir(), "maintainer-neutral-controller-"),
+  );
+  let privateBundle;
+  try {
+    const candidate = candidateFixture({
+      repository_snapshot: forwardEvaluationRepositorySnapshot(ROOT),
+      skill_path: "skills/agent-skill-maintainer",
+      skill_name: "agent-skill-maintainer",
+      candidate_skill_fingerprint: fingerprintTree(SKILL_ROOT),
+      process_artifact_prefixes:
+        FORWARD_EVALUATION_PROCESS_ARTIFACT_PREFIXES,
+    });
+    privateBundle = forwardEvaluationBindingFixture(
+      candidate,
+      ROOT,
+      { includePrivateSources: true },
+    );
+    const sources = privateBundle.sources;
+    const baseRequest = {
+      candidateSkillFingerprint:
+        sources.candidateSnapshot
+          .candidate_skill_fingerprint,
+      fixtureSha256:
+        sources.candidateSnapshot.evaluation_fixture_sha256,
+      fixtureRaw: sources.fixtureRaw,
+      fixture: sources.fixture,
+      assignment: sources.assignment,
+      sessions: sources.sessions,
+      labelA: sources.labelA,
+      labelB: sources.labelB,
+      judgeOutput: sources.judgeOutput,
+      measuredAt: sources.measuredAt,
+      unblindedAt: sources.unblindedAt,
+      platformValidationEvidence:
+        sources.platformValidationEvidence,
+    };
+    const forbiddenToolRequest = structuredClone(baseRequest);
+    forbiddenToolRequest.labelA.events = codexTranscript(
+      forbiddenToolRequest.sessions.label_a.session_nonce,
+      forbiddenToolRequest.labelA.output,
+      [
+        ...evaluationTranscriptTools(),
+        {
+          type: "web_search",
+          command: "search remote evidence",
+        },
+      ],
+    );
+    const providerSubstitutionRequest =
+      structuredClone(baseRequest);
+    const claudePlatform =
+      providerSubstitutionRequest.platformValidationEvidence
+        .platforms.find(
+          (platform) => platform.id === "claude-code",
+        );
+    claudePlatform.positive_transcript = codexTranscript(
+      "cross-provider-session",
+      claudePlatform.positive_output,
+    );
+    for (const [name, request, message] of [
+      [
+        "forbidden-tool",
+        forbiddenToolRequest,
+        /tool type is not allowed/u,
+      ],
+      [
+        "provider-substitution",
+        providerSubstitutionRequest,
+        /platform Claude runtime or output mismatch/u,
+      ],
+    ]) {
+      const requestPath = resolve(root, `${name}.json`);
+      writeFileSync(
+        requestPath,
+        `${JSON.stringify(request)}\n`,
+        "utf8",
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          sources.neutralControllerPath,
+          requestPath,
+          sources.authorityPrivateKeyPath,
+        ],
+        { encoding: "utf8" },
+      );
+      assert.notEqual(result.status, 0, name);
+      assert.match(result.stderr, message, name);
+    }
+    const keyPolicyRequestPath = resolve(
+      root,
+      "key-policy.json",
+    );
+    writeFileSync(
+      keyPolicyRequestPath,
+      `${JSON.stringify(baseRequest)}\n`,
+      "utf8",
+    );
+    const relativeKey = spawnSync(
+      process.execPath,
+      [
+        sources.neutralControllerPath,
+        keyPolicyRequestPath,
+        "relative-private.pem",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(relativeKey.status, 0);
+    assert.match(relativeKey.stderr, /must be absolute/u);
+
+    const symlinkedKeyPath = resolve(root, "private-link.pem");
+    symlinkSync(
+      sources.authorityPrivateKeyPath,
+      symlinkedKeyPath,
+    );
+    const symlinkedKey = spawnSync(
+      process.execPath,
+      [
+        sources.neutralControllerPath,
+        keyPolicyRequestPath,
+        symlinkedKeyPath,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(symlinkedKey.status, 0);
+    assert.match(
+      symlinkedKey.stderr,
+      /private regular file/u,
+    );
+
+    const callerOwnedCompletion = {
+      ...baseRequest,
+      platformSessions: [],
+    };
+    const callerOwnedCompletionPath = resolve(
+      root,
+      "caller-owned-completion.json",
+    );
+    writeFileSync(
+      callerOwnedCompletionPath,
+      `${JSON.stringify(callerOwnedCompletion)}\n`,
+      "utf8",
+    );
+    const callerOwnedResult = spawnSync(
+      process.execPath,
+      [
+        sources.neutralControllerPath,
+        "attest-platform-completion",
+        callerOwnedCompletionPath,
+        sources.authorityPrivateKeyPath,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(callerOwnedResult.status, 0);
+    assert.match(
+      callerOwnedResult.stderr,
+      /session receipts are incomplete/u,
+    );
+  } finally {
+    privateBundle?.cleanup();
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -952,6 +1425,104 @@ test("CLI GitHub inspection returns a live capability proof", () => {
   assert.equal(proof.fingerprint.length, 64);
 });
 
+test("branch push transition rejects candidate drift before consuming approval", () => {
+  const fixture = createCliBranchPushFixture();
+  try {
+    const prepared = prepareCliBranchPushAction(fixture, {
+      transition: false,
+    });
+    const consumedBefore = readRun(
+      prepared.stateRoot,
+      "run-001",
+    ).consumed_approval_fingerprints;
+    writeFileSync(
+      resolve(fixture.candidate, "SKILL.md"),
+      "source\nbranch push\ndrifted before transition\n",
+      "utf8",
+    );
+    assert.throws(
+      () =>
+        runMaintainerCommand([
+          "transition",
+          "--state-root",
+          prepared.stateRoot,
+          "--run-id",
+          "run-001",
+          "--phase",
+          "branch_push",
+          "--updates",
+          prepared.updatesPath,
+          "--candidate",
+          fixture.candidate,
+        ]),
+      /必須先提交|漂移/u,
+    );
+    const state = readRun(prepared.stateRoot, "run-001");
+    assert.equal(state.phase, "validation");
+    assert.deepEqual(
+      state.consumed_approval_fingerprints,
+      consumedBefore,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("GitHub apply revalidates the exact binding before reserving an attempt", () => {
+  const fixture = createCliBranchPushFixture();
+  try {
+    const prepared = prepareCliBranchPushAction(fixture);
+    const statePath = resolve(
+      prepared.stateRoot,
+      "runs",
+      "run-001",
+      "state.json",
+    );
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    const forward = state.validation_summary.checks.find(
+      (check) => check.category === "forward",
+    );
+    forward.details.aggregate.evaluated_at =
+      "2026-07-29T00:00:00.000Z";
+    forward.details.aggregate_fingerprint = fingerprint(
+      forward.details.aggregate,
+    );
+    writeFileSync(statePath, `${JSON.stringify(state)}\n`, "utf8");
+
+    assert.throws(
+      () =>
+        runMaintainerCommand(
+          [
+            "github-apply",
+            "--state-root",
+            prepared.stateRoot,
+            "--run-id",
+            "run-001",
+            "--preview",
+            prepared.previewPath,
+            "--approval",
+            prepared.approvalPath,
+            "--candidate",
+            fixture.candidate,
+          ],
+          {
+            githubRunner: () => {
+              throw new Error("binding drift must block before GitHub access");
+            },
+          },
+        ),
+      /aggregate|binding|來源|private sources/u,
+    );
+    assert.deepEqual(
+      readRun(prepared.stateRoot, "run-001")
+        .attempted_github_action_fingerprints,
+      [],
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("CLI branch push completes approval apply and reconcile", () => {
   const fixture = createCliBranchPushFixture();
   try {
@@ -1024,6 +1595,11 @@ test("CLI branch push completes approval apply and reconcile", () => {
         .github_action_attempts.at(-1).action,
       "branch_push",
     );
+    assert.equal(
+      readRun(stateRoot, "run-001")
+        .github_action_reconciliations.at(-1).status,
+      "applied",
+    );
 
     const reconciled = runMaintainerCommand(
       [
@@ -1045,6 +1621,104 @@ test("CLI branch push completes approval apply and reconcile", () => {
     );
     assert.equal(reconciled.status, "applied");
     assert.equal(reconciled.proof.commit, repository.head_commit);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("CLI applied reconcile releases an interrupted GitHub writer", () => {
+  const fixture = createCliBranchPushFixture();
+  try {
+    const prepared = prepareCliBranchPushAction(fixture);
+    const repository = fixture.candidateSnapshot.repository_snapshot;
+    const githubRunner = branchPushGithubRunner(prepared.state);
+    let pushed = false;
+    const gitRunner = (candidate, arguments_) => {
+      if (arguments_[0] === "ls-remote") {
+        return pushed
+          ? `${repository.head_commit}\trefs/heads/${fixture.branch}\n`
+          : "";
+      }
+      if (arguments_[0] === "cat-file") {
+        assert.notEqual(candidate, fixture.candidate);
+        return "";
+      }
+      if (arguments_[0] === "push") {
+        pushed = true;
+        throw new Error("synthetic response interruption after push");
+      }
+      throw new Error(`unexpected git call: ${arguments_.join(" ")}`);
+    };
+    assert.throws(
+      () =>
+        runMaintainerCommand(
+          [
+            "github-apply",
+            "--state-root",
+            prepared.stateRoot,
+            "--run-id",
+            "run-001",
+            "--preview",
+            prepared.previewPath,
+            "--approval",
+            prepared.approvalPath,
+            "--candidate",
+            fixture.candidate,
+          ],
+          {
+            githubRunner,
+            gitRunner,
+            temporaryRoot: fixture.root,
+          },
+        ),
+      /response interruption/u,
+    );
+    assert.equal(
+      readRun(prepared.stateRoot, "run-001")
+        .github_action_reconciliations.length,
+      0,
+    );
+    assert.throws(
+      () =>
+        transitionRun(
+          prepared.stateRoot,
+          "run-001",
+          "blocked",
+        ),
+      /reconciliation/u,
+    );
+
+    const reconciled = runMaintainerCommand(
+      [
+        "github-reconcile",
+        "--state-root",
+        prepared.stateRoot,
+        "--run-id",
+        "run-001",
+        "--preview",
+        prepared.previewPath,
+        "--approval",
+        prepared.approvalPath,
+      ],
+      {
+        githubRunner,
+        gitRunner,
+        temporaryRoot: fixture.root,
+      },
+    );
+    assert.equal(reconciled.status, "applied");
+    assert.equal(reconciled.reconciliation.status, "applied");
+    assert.equal(
+      readRun(prepared.stateRoot, "run-001")
+        .github_action_reconciliations.at(-1).status,
+      "applied",
+    );
+    const blocked = transitionRun(
+      prepared.stateRoot,
+      "run-001",
+      "blocked",
+    );
+    assert.equal(blocked.status, "blocked");
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1180,6 +1854,8 @@ test("CLI branch push records not-applied proof before allowing a new approval",
       "branch_push",
       "--updates",
       retryUpdatesPath,
+      "--candidate",
+      fixture.candidate,
     ]);
     assert.equal(retried.phase, "branch_push");
     assert.equal(
@@ -1589,7 +2265,7 @@ test("publication, evaluation, and repository validators execute directly", () =
   );
   assert.equal(
     report.agent_forward_evaluation.candidate_passed_behaviors,
-    8,
+    19,
   );
   assert.equal(report.agent_forward_evaluation.candidate_regressions, 0);
   assert.equal(report.platform_validation.passed, true);
@@ -1709,17 +2385,17 @@ test("forward fixture keeps positive discovery and negative non-trigger contract
   );
 });
 
-test("held-out fixture locks candidate cleanup and scoring A/B before outputs", () => {
+test("held-out fixture locks final evaluation binding A/B before outputs", () => {
   const fixture = JSON.parse(
-    read("evals/cases/candidate-cleanup-scoring-heldout.json"),
+    read("evals/cases/evaluation-binding-heldout.json"),
   );
   assert.equal(validateHeldoutForwardFixture(fixture), true);
   assert.equal(
     fixture.id,
-    "synthetic/candidate-cleanup-scoring-heldout",
+    "agent-skill-maintainer-eval-binding-heldout-v37",
   );
-  assert.equal(fixture.required_behaviors.length, 8);
-  assert.equal(fixture.raw_outputs_published, false);
+  assert.equal(fixture.required_behaviors.length, 19);
+  assert.equal(fixture.tool_profile.filesystem_writes, false);
   assert.equal(
     validateHeldoutForwardFixture({
       ...fixture,
@@ -1727,6 +2403,20 @@ test("held-out fixture locks candidate cleanup and scoring A/B before outputs", 
     }),
     false,
   );
+  const contentDrift = structuredClone(fixture);
+  contentDrift.target_files.candidate_sha256["SKILL.md"] =
+    "f".repeat(64);
+  assert.equal(validateHeldoutForwardFixture(contentDrift), false);
+  const traversal = structuredClone(fixture);
+  traversal.target_files.paths[0] = "../SKILL.md";
+  for (const hashes of [
+    traversal.target_files.baseline_sha256,
+    traversal.target_files.candidate_sha256,
+  ]) {
+    hashes["../SKILL.md"] = hashes["SKILL.md"];
+    delete hashes["SKILL.md"];
+  }
+  assert.equal(validateHeldoutForwardFixture(traversal), false);
 });
 
 test("Fork forward fixture and aggregate stay bound to the candidate Skill", () => {
@@ -1805,6 +2495,53 @@ test("local update forward fixture and aggregate stay bound to exact release beh
   );
 });
 
+test("neutral platform profile binds current k3 routing and constrains Codex output", () => {
+  const controller = read("scripts/neutral-evaluation-controller.mjs");
+  const skill = read("skills/agent-skill-maintainer/SKILL.md");
+  const evaluation = read(
+    "skills/agent-skill-maintainer/references/evaluation.md",
+  );
+  const security = read(
+    "skills/agent-skill-maintainer/references/security-and-privacy.md",
+  );
+  assert.match(controller, /"ANTHROPIC_AUTH_TOKEN"/u);
+  assert.match(controller, /"ANTHROPIC_BASE_URL"/u);
+  assert.match(controller, /model: "k3"/u);
+  assert.match(controller, /routing_policy: "current-environment-bound"/u);
+  assert.match(controller, /portability_policy: "default-only-nonblocking"/u);
+  assert.match(controller, /"--output-schema"/u);
+  assert.match(
+    controller,
+    /output mismatch: \$\{mismatches\.join\(", "\)\}/u,
+  );
+  for (const document of [skill, evaluation, security]) {
+    assert.match(document, /Codex.+default-only/isu);
+    assert.match(document, /Claude Code.+current-environment-bound/isu);
+    assert.match(document, /canonical model `k3`/u);
+    assert.match(document, /default-route portability/u);
+  }
+  assert.doesNotMatch(
+    skill,
+    /a default-only minimal environment policy/u,
+  );
+  assert.doesNotMatch(
+    skill,
+    /rejects caller prompts and provider route\/model\/proxy overrides/u,
+  );
+  assert.doesNotMatch(
+    evaluation,
+    /owns the prompt, default-only minimal environment/u,
+  );
+  assert.doesNotMatch(
+    evaluation,
+    /Caller prompt text and provider route\/model\/proxy overrides are rejected/u,
+  );
+  assert.doesNotMatch(
+    security,
+    /values are salted before the challenge commits them; endpoint, proxy, provider, and model selectors remain forbidden/u,
+  );
+});
+
 test("publication validator scans public docs but excludes local process artifacts", () => {
   const publicDirectory = resolve(ROOT, "docs", "public");
   const publicDocument = resolve(publicDirectory, "sample.md");
@@ -1819,6 +2556,110 @@ test("publication validator scans public docs but excludes local process artifac
   } finally {
     rmSync(publicDocument, { force: true });
     rmSync(publicDirectory, { recursive: true, force: true });
+  }
+});
+
+test("publication controller verification reads the live source bytes", () => {
+  const temporaryRoot = mkdtempSync(
+    join(tmpdir(), "maintainer-controller-source-"),
+  );
+  const controllerDirectory = resolve(temporaryRoot, "scripts");
+  const fixtureDirectory = resolve(
+    temporaryRoot,
+    "evals",
+    "cases",
+  );
+  mkdirSync(controllerDirectory, { recursive: true });
+  mkdirSync(fixtureDirectory, { recursive: true });
+  const controllerPath = resolve(
+    controllerDirectory,
+    "neutral-evaluation-controller.mjs",
+  );
+  const fixturePath = resolve(
+    fixtureDirectory,
+    "evaluation-binding-heldout.json",
+  );
+  writeFileSync(controllerPath, "stable controller\n", "utf8");
+  writeFileSync(
+    fixturePath,
+    `${JSON.stringify({
+      evaluator_authority: {
+        controller_sha256: createHash("sha256")
+          .update(readFileSync(controllerPath))
+          .digest("hex"),
+      },
+    })}\n`,
+    "utf8",
+  );
+  try {
+    assert.deepEqual(
+      validateNeutralControllerSource(temporaryRoot),
+      [],
+    );
+    writeFileSync(
+      controllerPath,
+      "drifted controller\n",
+      "utf8",
+    );
+    assert.deepEqual(
+      validateNeutralControllerSource(temporaryRoot),
+      [
+        "neutral evaluator controller does not match the locked fixture",
+      ],
+    );
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("publication disclosure scan includes tracked node_modules only", () => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "maintainer-disclosure-"));
+  const dependencyRoot = join(
+    temporaryRoot,
+    "node_modules",
+    "forced",
+  );
+  mkdirSync(dependencyRoot, { recursive: true });
+  writeFileSync(
+    join(dependencyRoot, "tracked.txt"),
+    `${["/Users", "private-user/secret"].join("/")}\n`,
+    "utf8",
+  );
+  writeFileSync(
+    join(dependencyRoot, "untracked.txt"),
+    "ignored dependency cache\n",
+    "utf8",
+  );
+  try {
+    const files = publicTextFiles(temporaryRoot, [
+      "node_modules/forced/tracked.txt",
+    ]);
+    assert.deepEqual(
+      files.map(({ relativePath }) => relativePath),
+      ["node_modules/forced/tracked.txt"],
+    );
+    assert.match(files[0].content, /\/Users\/private-user\//u);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("publication disclosure scan rejects private paths under tests", () => {
+  const probe = resolve(ROOT, "tests", "private-path-probe.md");
+  writeFileSync(
+    probe,
+    `${["/Users", "real-user/private"].join("/")}\n`,
+    "utf8",
+  );
+  try {
+    const errors = validatePublication();
+    assert.ok(
+      errors.some((error) =>
+        error.includes("tests/private-path-probe.md")),
+      errors.join("\n"),
+    );
+  } finally {
+    rmSync(probe, { force: true });
   }
 });
 

@@ -8,6 +8,7 @@
     "schema_version",
     "evidence_kind",
     "fixture",
+    "evaluation_input_sha256",
     "measured_at",
     "labels",
     "derivation",
@@ -18,6 +19,7 @@
     "schema_version": {"type": "integer", "const": 1},
     "evidence_kind": {"type": "string", "const": "blinded-measurement"},
     "fixture": {"type": "string", "minLength": 1},
+    "evaluation_input_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
     "measured_at": {"type": "string", "format": "date-time"},
     "labels": {
       "type": "object",
@@ -35,7 +37,7 @@
       "properties": {
         "builder": {"type": "string", "const": "agent-skill-maintainer/blinded-measurement-v1"},
         "encoding": {"type": "string", "const": "utf8"},
-        "tool_event_type": {"type": "string", "const": "tool_call"},
+        "tool_event_type": {"type": "string", "const": "codex-jsonl-complete-session"},
         "heading_rule": {"type": "string", "const": "markdown-atx"}
       }
     },
@@ -51,6 +53,8 @@
         "events_sha256",
         "artifact_bytes",
         "tool_calls",
+        "session_nonce",
+        "tool_sequence_sha256",
         "heading_count"
       ],
       "properties": {
@@ -58,6 +62,8 @@
         "events_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
         "artifact_bytes": {"type": "integer", "minimum": 1},
         "tool_calls": {"type": "integer", "minimum": 0},
+        "session_nonce": {"type": "string", "minLength": 1},
+        "tool_sequence_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
         "heading_count": {"type": "integer", "minimum": 0}
       }
     }

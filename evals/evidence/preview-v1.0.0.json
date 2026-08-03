@@ -1,13 +1,15 @@
 {
-  "schema_version": 3,
+  "schema_version": 5,
   "evidence_kind": "blinded-forward-aggregate",
-  "evaluated_at": "2026-07-29T02:41:10.000Z",
-  "fixture": "synthetic/candidate-cleanup-scoring-heldout",
-  "candidate_skill_fingerprint": "8fb4a79b69bcb321b38a4c6c7ee284c2c465ca709ba7a74a4d42795b233bfd2d",
+  "evaluated_at": "2026-07-30T10:33:28.789Z",
+  "fixture": "agent-skill-maintainer-eval-binding-heldout-v37",
+  "candidate_skill_fingerprint": "9ce7aadfacdb627c7b423f659ee42232a0a67a5cbea741072ae9b4a037ec897d",
   "raw_outputs_published": false,
   "evidence_sources": {
-    "adjudication_sha256": "ceb350304de39703c562579a9fbc8edf5cd79a6b8ada17e3a514cfd0af65b386",
-    "measurement_sha256": "fecf98145214eceb8657ab26366aee630254667aed065f5c3dd583aba9e93970"
+    "adjudication_sha256": "234d7d82773be5d922e727f63fa00d90e31623430628ea72d1f75c5cdbe8e6aa",
+    "measurement_sha256": "16bbe18ebf04a7f6f8216dd313b63b08f744ac444a7d44e24d5f46f460beb581",
+    "platform_validation_sha256": "d710a265082b2c2f6fb7238f7116aeeaa68688852fe9179ed455d7b99f43231c",
+    "private_source_manifest_sha256": "90057217346ac088dbe08e24f93de135e37dbe52faa1a174dd336c7200ccce95"
   },
   "protocol": {
     "fixture_status": "held-out",
@@ -17,103 +19,213 @@
     "independent_judge": true,
     "verdicts_recorded_before_unblind": true,
     "same_model_and_tools": true,
-    "model_id": "gpt-5.6-sol",
-    "judge_model_id": "gpt-5.6-sol",
-    "locked_at": "2026-07-29T02:31:11.000Z",
-    "assignment_committed_at": "2026-07-29T02:36:00.391Z",
-    "baseline_started_at": "2026-07-29T02:36:21.000Z",
-    "candidate_started_at": "2026-07-29T02:36:34.264Z",
-    "judging_completed_at": "2026-07-29T02:40:19.913Z",
-    "unblinded_at": "2026-07-29T02:40:59.330Z",
-    "prompt_sha256": "628963211d99199d53d807e6eabe3ea2d30a236cba95806df71cfa7e12a7d243",
-    "artifacts_sha256": "0b39990c4f4ba95bb49d3777e20d3a5e3824f1d1d47f4f67c06971bb55fa749e",
-    "rubric_sha256": "0fcd4810dfcec62153591e4b248eb16b225c04e5d61c51f618682267e00fa4ea",
-    "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
-    "baseline_session_sha256": "20484b4393bbe1416353f376d244ed88be4c7b32f406fd64f7b7fb2ae0645da8",
-    "candidate_session_sha256": "cd6930e1c33705b92e62e13f74054b7bdf121a24d14daebc4b533fe6788f7243",
-    "judge_session_sha256": "be3d30eb0fc0ca341b2bcf97e9e7a9a1480511411817c0f39153724ddb4bc75f"
+    "model_id": "gpt-5.4",
+    "judge_model_id": "gpt-5.4",
+    "locked_at": "2026-07-30T10:21:23.064Z",
+    "assignment_committed_at": "2026-07-30T10:21:23.200Z",
+    "evaluation_input_sha256": "b40ff954727298eb659599ccce0a8213e7f4e0c5a998dc5c1826879790f68c06",
+    "baseline_started_at": "2026-07-30T10:21:44.230Z",
+    "candidate_started_at": "2026-07-30T10:21:44.236Z",
+    "judging_completed_at": "2026-07-30T10:32:12.244Z",
+    "unblinded_at": "2026-07-30T10:32:17.937Z",
+    "prompt_sha256": "6e31bb7510203e132188875bb3d02d0c8cfb485f45144fd933d0ed62e564bdd1",
+    "artifacts_sha256": "67fcaa148e1630435ace27a4da02d48959fead0088bf76d80505c44b275a8844",
+    "rubric_sha256": "4009fb1ab974fc6cf89007ad6f53673043bc6e95897be96b5c2ee5259a96b6cb",
+    "tool_profile_sha256": "9e1aedeb81606938384611aa9f673e74cfd36760f0255009c4d89af71d9b7ed0",
+    "baseline_session_sha256": "ca8f8875d851111b58108857413e38d1c73853493e14c163eb37e2d360ec9fd5",
+    "candidate_session_sha256": "f798226653eca5e5b48230f29e58d875e3d050c7ce46d444e4b95e263ba5cbb1",
+    "judge_session_sha256": "fc94a2edaa0a30c074142fdb9d7f8a7bd4424bd41079e7299a442e13b6dcfa67"
   },
   "forward_evaluation": {
     "expected_findings_hidden": true,
     "required_behaviors": [
       {
-        "id": "active-aborted-and-ambiguous-resources-block",
+        "id": "binds-evaluation-sessions-to-input-commitment",
         "baseline_verdict": "fail",
         "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "33a3ffd4550939e96d4a8c167cb6e99e23aa37fb2e2cf12e7cc133eb792f24ae",
-        "candidate_evidence_sha256": "00111a18d86ee768b63f1ada08f8d59def49e95c8654680bf342756a6be1e798"
+        "baseline_evidence_sha256": "91c33877c9525b9624edca512746821a07191c9bcf2f2011fb7a5a5396237fc7",
+        "candidate_evidence_sha256": "b94eae35be774726cee74d77af77aa6f3fcb069e2065ef9fa9a16687b4f6383f"
       },
       {
-        "id": "candidate-does-not-self-approve",
-        "baseline_verdict": "pass",
-        "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "5c89de1d32caec3bb999b8c9be17adf02d9ce0ed400acc3f14966ab2b52c382d",
-        "candidate_evidence_sha256": "1aed3047e43fa91987d193135c3e797d098c940bb191da94ba09fb868899cbc6"
-      },
-      {
-        "id": "cleanup-attempt-precedes-quarantine-delete",
-        "baseline_verdict": "pass",
-        "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "0240b567b2d13272b93b599d33e51b55e8c9d6c76781b31e836d427303cba0c3",
-        "candidate_evidence_sha256": "61f2a99ef05a7f0d59892be8ff5123455871eee2c9e84061493850ba7984f5be"
-      },
-      {
-        "id": "cleanup-exact-candidate-only",
+        "id": "binds-platform-validation-sessions",
         "baseline_verdict": "fail",
         "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "da7c0032421ec831b8be517511941c88965b0166e3b08469c59e201961ce6215",
-        "candidate_evidence_sha256": "346c2f94821bce77ca26c1af4921addca7fc572467a0edb54a8826bf9bf391d8"
+        "baseline_evidence_sha256": "43bda7f20fc3fffa9f8f09f33674fe46a5a15da34221175a45e503fbf8d9cf54",
+        "candidate_evidence_sha256": "d2e07b6fe7bb65a1e386edf7586ba9437167a50b0a61fb112159ca094a6629ed"
       },
       {
-        "id": "cleanup-reconcile-does-not-replay",
+        "id": "binds-publication-to-head-commit-tree",
         "baseline_verdict": "fail",
         "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "b538c02b6a04ae2e6cd2c597ce276f0866d34bed2092c92650075ce551f7d8bb",
-        "candidate_evidence_sha256": "e662e0ad63f5edf0d5897ed97cf21ffa3808e52ceee6db37506391c8eeaaf241"
+        "baseline_evidence_sha256": "d40bbbab10fba6afb3866cd41733572285fc13fbe551c3421906cfd3bec25153",
+        "candidate_evidence_sha256": "c1e7cd8bc46dc5d93f0b59312173c1104468723ecf83bb09120f2720903cef72"
       },
       {
-        "id": "independent-pre-unblind-judge-required",
+        "id": "binds-snapshot-to-locked-fixture",
         "baseline_verdict": "fail",
         "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "7f6630a020c07674230af48fde5e0792b8bbecc0fef1239bfbddd68ea44681ab",
-        "candidate_evidence_sha256": "4be96358e6845e486f12196384cef01899269c36341f23ab0487be74dfc346f7"
+        "baseline_evidence_sha256": "a9281f7311705879ddc586a47bc1ec20061927b063b85a2711fe90bc089c2e89",
+        "candidate_evidence_sha256": "49a9310fa790d5bd69c8df99da1ac1cdf743dba6c8a5f675b7f419f41a1a9aea"
       },
       {
-        "id": "measurement-and-aggregate-are-derived",
-        "baseline_verdict": "pass",
+        "id": "binds-target-skill-name-and-path",
+        "baseline_verdict": "fail",
         "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "da4456432ea55771dcdf2d92f4040f4ecd0d31434a119b0a49b0c17e910672c3",
-        "candidate_evidence_sha256": "9d7359ebadcd5b850daefc59ffad791736240c8287c28afc72b388ae9909e7b2"
+        "baseline_evidence_sha256": "d420072c7731b20d6a69cebf721ea065114724f2546c96137739da7cc937f2e4",
+        "candidate_evidence_sha256": "e74c7b96d23fde265bf534ef45f387c99faa19cc25f6ec47412bc46a5adcedd9"
       },
       {
-        "id": "terminal-source-run-remains-byte-stable",
+        "id": "blocks-rederived-forged-target-hash",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "1a4b92125a055a12073aab657cafbeb6d2aec2ac96561e9d236be105e35120d0",
+        "candidate_evidence_sha256": "b462b56488df3ae10563d68ee91db9589db9bdb2fc2e3ec77132695386cf665a"
+      },
+      {
+        "id": "bounds-legacy-to-terminal-release-continuation",
         "baseline_verdict": "pass",
         "candidate_verdict": "pass",
-        "baseline_evidence_sha256": "971d0dc1514ed2cef588832371baeab5d7e104fa65a855a5258e70aae373f030",
-        "candidate_evidence_sha256": "282003316527f6f75c166e91ae08c833f7c393a398770b40cb5b44ae68658d4b"
+        "baseline_evidence_sha256": "3ebf429780e6c1ab6d3316a9c8a5f004840ea55029766d2c386dc64c5959c8d4",
+        "candidate_evidence_sha256": "76665f157e7bc0b06cf8f2b69257a2e6c992dcee71e34132de420e3f3a7d385d"
+      },
+      {
+        "id": "bounds-measurement-before-judging",
+        "baseline_verdict": "insufficient_evidence",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "3197b0574b83d142820dd425294b34c1ff29408b39121b85cb063a47f465c714",
+        "candidate_evidence_sha256": "ff4f639b2577cc2ad2148c67b9860a53e8322e89adae0509094eede2ef4b8066"
+      },
+      {
+        "id": "continuation-cannot-reenter-merge",
+        "baseline_verdict": "insufficient_evidence",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "012aeb357214079300a7f5b003ff7f647a562036ecd5a54e5d576f48771f0ef8",
+        "candidate_evidence_sha256": "7a38150bc3bb1eaac89eb1e181d71628cac551ef28699d1c16525e607d3199b2"
+      },
+      {
+        "id": "exposes-runtime-eval-bind-contract",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "fcce103e11e95843b50a6ec9b2ebfa82dd51404cb1cf977bf52645cd8f16e5d3",
+        "candidate_evidence_sha256": "6751110c78f53eb2e086b5ea921b3a2308bd292a10dce67d16e18d7a49deee31"
+      },
+      {
+        "id": "includes-mode-and-node-modules-in-tree-identity",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "982a3231c5ba6bad6fb28eb11ff0104afbcb4517e9a20d790e75e5c0b1fb6db6",
+        "candidate_evidence_sha256": "b52626c443995b8c50b7801d89c140407b7720e247ed839db4b0cf199ea18747"
+      },
+      {
+        "id": "keeps-binding-analysis-read-only",
+        "baseline_verdict": "insufficient_evidence",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "cbdaa0ab69147a2168ce3ba946d2c77f0da40c170e78df97809cefed5b901c98",
+        "candidate_evidence_sha256": "486ab8f606e4e779f931dccdb38c223e91fd1912e2eeb1e061ba6763f91c4a6a"
+      },
+      {
+        "id": "keeps-evaluation-input-views-label-neutral",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "12b4fb62b55e6e1d705965f7527fef6b5f63de76cbdab064ad73924690a6c140",
+        "candidate_evidence_sha256": "c0a9c1e0e3dc27712f37a15020f82cc50509ce3823e5644cee8e2a3f97b69f4b"
+      },
+      {
+        "id": "requires-exact-source-rederivation",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "e1be36d92b5a2ca8e6eba7621aa264cb14d1a07dc2d4d42657057ecac2f3aee3",
+        "candidate_evidence_sha256": "851d92b1e766de7e7c1edb40aca094d4115b20e79131b8e52be03131bfcb3eee"
+      },
+      {
+        "id": "requires-pr-ready-exact-binding",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "fc96d66a5ca055a46e07331b6203d76e22b887f0bca73626b090cf4f0f072415",
+        "candidate_evidence_sha256": "bc040e3012434c3f576e932a50daf9fc470dd9000b6f60c8bad17deadd8fd0e2"
+      },
+      {
+        "id": "revalidates-final-skill-before-push-transition",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "3a76eb4dc5b8c7be3c35a1c25e415ffb371e6923e23be9e63cac31da7fc09fc3",
+        "candidate_evidence_sha256": "a3f4f0f1589355ce972612ca52a573c67b427fbfaa8975a3b14d7be09025eef3"
+      },
+      {
+        "id": "scans-tracked-node-modules-for-disclosure",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "d906be701e6523415fbbd4a6d55f250464dbe2cef8603f92394a82d8b6662701",
+        "candidate_evidence_sha256": "67b9884b0ad2cbfba680887112ccc759c18ab7e7614985dcaf6ad7671220d67a"
+      },
+      {
+        "id": "supplies-complete-callable-runtime-bundles",
+        "baseline_verdict": "fail",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "20cb553d6859d615ea6b3af7d5f0119c149273b200939036afcddf8afc7b3c0c",
+        "candidate_evidence_sha256": "e2c33ccce08b4dd1075b3881171120544ef86d1922e7041ea1b7806a0f365e1a"
+      },
+      {
+        "id": "terminal-transition-cannot-cross-inflight-github-apply",
+        "baseline_verdict": "insufficient_evidence",
+        "candidate_verdict": "pass",
+        "baseline_evidence_sha256": "3c09e28741cb3aa221a27ea37717331ad9d7bb1959c6a3c5e095910fd461ec12",
+        "candidate_evidence_sha256": "091e0cf311d4a14527d87685ce5a9a03088a2e1a65020dbe639ddd1dab8acc94"
       }
     ],
-    "baseline_passed_behaviors": 4,
-    "candidate_passed_behaviors": 8,
+    "baseline_passed_behaviors": 1,
+    "candidate_passed_behaviors": 19,
     "candidate_regressions": 0,
     "false_positive_optimizations": 0,
     "passed": true
   },
   "cost": {
-    "baseline_artifact_bytes": 3851,
-    "candidate_artifact_bytes": 3781,
-    "artifact_byte_ratio": 0.981822903142041,
-    "baseline_tool_calls": 3,
-    "candidate_tool_calls": 3,
+    "baseline_artifact_bytes": 36356,
+    "candidate_artifact_bytes": 40418,
+    "artifact_byte_ratio": 1.1117284629772253,
+    "baseline_tool_calls": 25,
+    "candidate_tool_calls": 34,
     "candidate_heading_count": 0,
     "passed": true
   },
   "platform_validation": {
+    "candidate_skill_fingerprint": "9ce7aadfacdb627c7b423f659ee42232a0a67a5cbea741072ae9b4a037ec897d",
+    "validated_at": "2026-07-30T10:33:28.789Z",
     "installer": {
       "name": "skills",
-      "version": "1.5.20",
+      "version": "1.5.21",
       "scope": "isolated-project-copy"
     },
+    "installed_copies": [
+      {
+        "platform": "codex",
+        "case": "positive",
+        "installation_relative_path": ".agents/skills/agent-skill-maintainer",
+        "tree_fingerprint": "9ce7aadfacdb627c7b423f659ee42232a0a67a5cbea741072ae9b4a037ec897d",
+        "file_count": 66
+      },
+      {
+        "platform": "codex",
+        "case": "negative",
+        "installation_relative_path": ".agents/skills/agent-skill-maintainer",
+        "tree_fingerprint": "9ce7aadfacdb627c7b423f659ee42232a0a67a5cbea741072ae9b4a037ec897d",
+        "file_count": 66
+      },
+      {
+        "platform": "claude-code",
+        "case": "positive",
+        "installation_relative_path": ".claude/skills/agent-skill-maintainer",
+        "tree_fingerprint": "9ce7aadfacdb627c7b423f659ee42232a0a67a5cbea741072ae9b4a037ec897d",
+        "file_count": 66
+      },
+      {
+        "platform": "claude-code",
+        "case": "negative",
+        "installation_relative_path": ".claude/skills/agent-skill-maintainer",
+        "tree_fingerprint": "9ce7aadfacdb627c7b423f659ee42232a0a67a5cbea741072ae9b4a037ec897d",
+        "file_count": 66
+      }
+    ],
     "platforms": [
       {
         "id": "codex",
@@ -125,11 +237,15 @@
         "stable_ids": true,
         "decision_boundary": true,
         "files_modified": false,
+        "positive_output_sha256": "c5f63d47d78177dacab4a36be55735dc92b7863ac4427aa6a945ed36f515c162",
+        "positive_transcript_sha256": "186d21f7820834fe4923db5a7daee96454dc3d3e9221e5d2d3e5ba6c51914d99",
+        "negative_output_sha256": "f7fa630975bf5f7f4b611cc29bdbf82582cbaef8b450d436ce9b01328ddbf49c",
+        "negative_transcript_sha256": "b54e19c8901d3bf41c25d0bbde2eec94fc352268bc33b040e9fd1a376bf05125",
         "passed": true
       },
       {
         "id": "claude-code",
-        "version": "2.1.220",
+        "version": "2.1.220 (Claude Code)",
         "explicit_trigger": true,
         "target_and_reference_read": true,
         "positive_analysis": true,
@@ -137,20 +253,24 @@
         "stable_ids": true,
         "decision_boundary": true,
         "files_modified": false,
+        "positive_output_sha256": "f15f63cee5a1bbdffafa7bcdab2e624bb4891a29ee235e29fa2bfd31eba1ea00",
+        "positive_transcript_sha256": "c5e514f779195d559eeac6408ddadd35b6f78c713b08f00679ff7372cf3ea69d",
+        "negative_output_sha256": "124ded8527afbef868506875b28975b5ded9a9efd00ac5a59aed867a72880c29",
+        "negative_transcript_sha256": "3a62ed2cf64ef5438811138822552b88c598ec647eef4340bf2a0f48a7f37d25",
         "passed": true
       }
     ],
     "passed": true
   },
   "limits": [
-    "The synthetic fixture, prompt, rubric, thresholds, assignment commitment, and read-only tool profile were locked before the final A/B outputs.",
-    "Baseline, candidate, and Judge used distinct explicit gpt-5.6-sol sessions; the Judge completed before the randomized labels were unblinded.",
-    "Raw outputs, tool events, the random seed, and unredacted Judge evidence remain local; public evidence contains only hashes and synthetic summaries.",
-    "The candidate passed all 8 locked behaviors, the baseline passed 4, candidate regressions were 0, and false-positive optimizations were 0.",
-    "Candidate output size was 3781 bytes versus baseline 3851 bytes, both used 3 read-only tool calls, and neither output used Markdown headings.",
-    "The current stable v1.3.0 controller remains the authority for this self-maintenance run; the candidate scoring code cannot approve itself.",
-    "An isolated project copy with the exact candidate fingerprint passed Codex positive and negative triggering, target/reference reading, stable-ID, decision-boundary, Provider-selection, Fork, and local-update forward checks without file changes.",
-    "Claude Code 2.1.220 installed the same exact candidate copy and, using the configured k3 model through the user-scoped gateway settings, passed positive and negative triggering, stable-ID, decision-boundary, Provider-selection, Fork, and local-update forward checks without file changes.",
-    "Fork, local-update, and Provider aggregates are refreshed to the current candidate fingerprint; all platform evidence remains local-analysis-only and no remote action or primary installation change was executed."
+    "The current synthetic fixture, rubric, complete evaluation-input commitment, private-source binding and persistent runtime-workspace contract, target Skill identity, thresholds, complete-tree bundle identities, and read-only tool profile were locked after the final candidate was frozen and before A/B generation.",
+    "Both labels receive complete callable Skill trees; tree identity uses raw UTF-8 byte ordering and includes regular-file mode, path, and blob for tracked node_modules and every other publishable file.",
+    "Each label also receives the opaque matching repository publication validator whose SHA-256 was locked in usage_evidence.supplemental_repository_targets before generation.",
+    "Baseline, candidate, and Judge use distinct same-model sessions; their identities commit the exact locked fixture before outputs and before unblinding.",
+    "Generators and Judge receive separate label-neutral views and commit each exact input_view_sha256; measurement occurs only after both generators complete and no later than Judge start.",
+    "Raw outputs, events, seed, session nonces, runtime paths, and unredacted Judge evidence remain in the private run directory; the binding builder re-reads them and publishes only redacted summaries and source hashes.",
+    "The exact candidate mode/path/blob fingerprint, target name/path, fixture raw SHA-256, and immutable head_commit blobs must all match before publication.",
+    "Platform positive/negative activation sessions are produced only after unblinding, intrinsically bind evaluation/candidate/copy/platform/case/nonce/time, and are re-derived by the binding builder as an independent source for the exact candidate fingerprint.",
+    "The stable installed controller remains authoritative; no approval, lifecycle mutation, GitHub write, global replacement, publication, or cleanup occurs during evaluation."
   ]
 }

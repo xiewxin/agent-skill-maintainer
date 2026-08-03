@@ -19,7 +19,7 @@
     "limits"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 3},
+    "schema_version": {"type": "integer", "const": 5},
     "evidence_kind": {"type": "string", "const": "blinded-forward-aggregate"},
     "evaluated_at": {"type": "string", "format": "date-time"},
     "fixture": {"type": "string", "minLength": 1},
@@ -28,10 +28,12 @@
     "evidence_sources": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["adjudication_sha256", "measurement_sha256"],
+      "required": ["adjudication_sha256", "measurement_sha256", "platform_validation_sha256", "private_source_manifest_sha256"],
       "properties": {
         "adjudication_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
-        "measurement_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
+        "measurement_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "platform_validation_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "private_source_manifest_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"}
       }
     },
     "protocol": {
@@ -49,6 +51,7 @@
         "judge_model_id",
         "locked_at",
         "assignment_committed_at",
+        "evaluation_input_sha256",
         "baseline_started_at",
         "candidate_started_at",
         "judging_completed_at",
@@ -73,6 +76,7 @@
         "judge_model_id": {"type": "string", "minLength": 1},
         "locked_at": {"type": "string", "format": "date-time"},
         "assignment_committed_at": {"type": "string", "format": "date-time"},
+        "evaluation_input_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
         "baseline_started_at": {"type": "string", "format": "date-time"},
         "candidate_started_at": {"type": "string", "format": "date-time"},
         "judging_completed_at": {"type": "string", "format": "date-time"},
@@ -160,8 +164,17 @@
     "platform_validation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["installer", "platforms", "passed"],
+      "required": [
+        "candidate_skill_fingerprint",
+        "validated_at",
+        "installer",
+        "installed_copies",
+        "platforms",
+        "passed"
+      ],
       "properties": {
+        "candidate_skill_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+        "validated_at": {"type": "string", "format": "date-time"},
         "installer": {
           "type": "object",
           "additionalProperties": false,
@@ -170,6 +183,22 @@
             "name": {"type": "string", "const": "skills"},
             "version": {"type": "string", "minLength": 1},
             "scope": {"type": "string", "const": "isolated-project-copy"}
+          }
+        },
+        "installed_copies": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["platform", "tree_fingerprint", "file_count"],
+            "properties": {
+              "platform": {"type": "string", "enum": ["codex", "claude-code"]},
+              "case": {"type": "string", "enum": ["positive", "negative"]},
+              "installation_relative_path": {"type": "string", "enum": [".agents/skills/agent-skill-maintainer", ".claude/skills/agent-skill-maintainer"]},
+              "tree_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "file_count": {"type": "integer", "minimum": 1}
+            }
           }
         },
         "platforms": {
@@ -187,6 +216,10 @@
               "stable_ids",
               "decision_boundary",
               "files_modified",
+              "positive_output_sha256",
+              "positive_transcript_sha256",
+              "negative_output_sha256",
+              "negative_transcript_sha256",
               "passed"
             ],
             "properties": {
@@ -199,6 +232,10 @@
               "stable_ids": {"type": "boolean"},
               "decision_boundary": {"type": "boolean"},
               "files_modified": {"type": "boolean"},
+              "positive_output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "positive_transcript_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "negative_output_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
+              "negative_transcript_sha256": {"type": "string", "pattern": "[a-f0-9]{64}"},
               "passed": {"type": "boolean"}
             }
           }

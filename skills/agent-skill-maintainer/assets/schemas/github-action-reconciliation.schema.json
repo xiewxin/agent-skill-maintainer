@@ -21,7 +21,7 @@
     "approval_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
     "preview_fingerprint": {"type": "string", "pattern": "[a-f0-9]{64}"},
     "observed_at": {"type": "string", "format": "date-time"},
-    "status": {"type": "string", "enum": ["not_applied", "partial", "pending", "blocked", "drifted"]},
+    "status": {"type": "string", "enum": ["applied", "not_applied", "partial", "pending", "blocked", "drifted"]},
     "remote_state_hash": {"type": "string", "pattern": "[a-f0-9]{64}"}
   }
 }

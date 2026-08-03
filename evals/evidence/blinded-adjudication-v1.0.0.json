@@ -1,157 +1,319 @@
 {
   "schema_version": 1,
   "evidence_kind": "blinded-adjudication",
-  "fixture": "synthetic/candidate-cleanup-scoring-heldout",
-  "rubric_sha256": "0fcd4810dfcec62153591e4b248eb16b225c04e5d61c51f618682267e00fa4ea",
+  "fixture": "agent-skill-maintainer-eval-binding-heldout-v37",
+  "rubric_sha256": "4009fb1ab974fc6cf89007ad6f53673043bc6e95897be96b5c2ee5259a96b6cb",
   "assignment": {
     "method": "randomized-a-b",
-    "committed_at": "2026-07-29T02:36:00.391Z",
-    "seed_commitment_sha256": "a265a8158043471b5c8ad224fc55754f387f758ac7b776024425d1cc40a67f13",
-    "baseline_label": "a",
-    "candidate_label": "b"
+    "committed_at": "2026-07-30T10:21:23.200Z",
+    "seed_commitment_sha256": "ba4e20b25815aa4ca3e3e48ecd06fe6669f1b73008c00aa83b5ee22da8506428",
+    "evaluation_input_sha256": "b40ff954727298eb659599ccce0a8213e7f4e0c5a998dc5c1826879790f68c06",
+    "baseline_label": "b",
+    "candidate_label": "a"
   },
   "sessions": {
     "label_a": {
-      "model_id": "gpt-5.6-sol",
-      "session_sha256": "20484b4393bbe1416353f376d244ed88be4c7b32f406fd64f7b7fb2ae0645da8",
-      "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
-      "started_at": "2026-07-29T02:36:21.000Z",
-      "completed_at": "2026-07-29T02:37:28.678Z",
-      "output_sha256": "1ad7c88ef8fd3e0d3effa4204d5c91c1ceb2a14879aa306a7910798d106ae3fd"
+      "model_id": "gpt-5.4",
+      "session_sha256": "f798226653eca5e5b48230f29e58d875e3d050c7ce46d444e4b95e263ba5cbb1",
+      "tool_profile_sha256": "9e1aedeb81606938384611aa9f673e74cfd36760f0255009c4d89af71d9b7ed0",
+      "evaluation_input_sha256": "b40ff954727298eb659599ccce0a8213e7f4e0c5a998dc5c1826879790f68c06",
+      "input_view_sha256": "82a39ad54d36edbb585a9f853f82068913640382f4cfc64b6601f3786c303cba",
+      "runtime_bundle_sha256": "7dfa624f6cb0ad37eefb2ae4d4b84b48991f4f455fb712867364610f3cb7f576",
+      "transcript_sha256": "b4f395fccbd55d29ba48b5ef714d27c929d89bf1aadfb0e2a3f0170f83957f7b",
+      "tool_calls": 34,
+      "tool_sequence_sha256": "f30ad33069c936711371520ce141875086625e4f31331769558ce74e97287925",
+      "started_at": "2026-07-30T10:21:44.236Z",
+      "completed_at": "2026-07-30T10:27:50.345Z",
+      "output_sha256": "437c22d60983da4de3464c8ba02e90842f835bd377b6161604f9a03e249ff2c6"
     },
     "label_b": {
-      "model_id": "gpt-5.6-sol",
-      "session_sha256": "cd6930e1c33705b92e62e13f74054b7bdf121a24d14daebc4b533fe6788f7243",
-      "tool_profile_sha256": "b9598d6475cf4dd775771390e4b9d1133758c3a67cddb3a2c978ff000eeda900",
-      "started_at": "2026-07-29T02:36:34.264Z",
-      "completed_at": "2026-07-29T02:37:21.269Z",
-      "output_sha256": "d64765d88bdc114a47ca1a6fefb3151e0b95a21d6ca97f473419940ec1751298"
+      "model_id": "gpt-5.4",
+      "session_sha256": "ca8f8875d851111b58108857413e38d1c73853493e14c163eb37e2d360ec9fd5",
+      "tool_profile_sha256": "9e1aedeb81606938384611aa9f673e74cfd36760f0255009c4d89af71d9b7ed0",
+      "evaluation_input_sha256": "b40ff954727298eb659599ccce0a8213e7f4e0c5a998dc5c1826879790f68c06",
+      "input_view_sha256": "8e86d76da4a85221af2004d81025b374c0f93355c904acec9c72478d9f4a6ff2",
+      "runtime_bundle_sha256": "6a25452658956536c2b5ef396d7b1ae3e723f02a91d225abb7c44da9540dc5e5",
+      "transcript_sha256": "ada30efd08c6f00e4b1c32297d4e779d4e3816ab0e4eb0f9df8972d39ee514a9",
+      "tool_calls": 25,
+      "tool_sequence_sha256": "1313f12b864c89424306f7201e35f90ffe093993aaffa77e1d5e95eb6ebcb1a5",
+      "started_at": "2026-07-30T10:21:44.230Z",
+      "completed_at": "2026-07-30T10:27:25.377Z",
+      "output_sha256": "3dba785c57c7abef5cd48e79b27d30ae29b56848c086e8c3b2a91f00ca10019d"
     },
     "judge": {
-      "model_id": "gpt-5.6-sol",
-      "session_sha256": "be3d30eb0fc0ca341b2bcf97e9e7a9a1480511411817c0f39153724ddb4bc75f",
-      "started_at": "2026-07-29T02:38:06.876Z",
-      "completed_at": "2026-07-29T02:40:19.913Z",
-      "output_sha256": "1d31028d0c4f5666ea5a96051963f62afb4ba72b2fe1d969b8e0fd34e9fe4e18"
+      "model_id": "gpt-5.4",
+      "session_sha256": "fc94a2edaa0a30c074142fdb9d7f8a7bd4424bd41079e7299a442e13b6dcfa67",
+      "evaluation_input_sha256": "b40ff954727298eb659599ccce0a8213e7f4e0c5a998dc5c1826879790f68c06",
+      "input_view_sha256": "eb2b3d37c59d2e573765f8f1cc840960a256d5ed64bbe2d761360855e3058825",
+      "input_bundle_sha256": "fd9a65d1267d839c736bee0f71bb1a6041e44c1b3bd6ae2379ef0d3d7bf22296",
+      "transcript_sha256": "1bc00f2255ecb01d846770f277d6e84689b3b8a0dc1fd363f660777f9af72c73",
+      "tool_calls": 0,
+      "tool_sequence_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "started_at": "2026-07-30T10:27:56.243Z",
+      "completed_at": "2026-07-30T10:32:12.244Z",
+      "output_sha256": "014a3c42e1135bf05b015e67fcb5b8e8c79e9c8fe8f1d1e82a0f4f2a6176b859"
     }
   },
   "judging": {
-    "started_at": "2026-07-29T02:38:06.876Z",
-    "completed_at": "2026-07-29T02:40:19.913Z",
-    "unblinded_at": "2026-07-29T02:40:59.330Z",
+    "started_at": "2026-07-30T10:27:56.243Z",
+    "completed_at": "2026-07-30T10:32:12.244Z",
+    "unblinded_at": "2026-07-30T10:32:17.937Z",
     "expected_findings_hidden": true,
     "labels_hidden_from_judge": true
   },
   "behaviors": [
     {
-      "id": "active-aborted-and-ambiguous-resources-block",
+      "id": "binds-evaluation-sessions-to-input-commitment",
       "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records direct evidence that the verifier rebuilds generator and judge session identity from raw transcripts, enforces the locked read-only command grammar, and cross-checks session, output, and view commitments before accepting the binding.",
+        "evidence_sha256": "b94eae35be774726cee74d77af77aa6f3fcb069e2065ef9fa9a16687b4f6383f"
+      },
+      "label_b": {
         "verdict": "fail",
-        "rationale_summary": "阻擋了 active、aborted、漂移、連結與多種不明確資源，但未明確阻擋特殊檔案，未完整符合鎖定行為。",
-        "evidence_sha256": "33a3ffd4550939e96d4a8c167cb6e99e23aa37fb2e2cf12e7cc133eb792f24ae"
-      },
-      "label_b": {
-        "verdict": "pass",
-        "rationale_summary": "明確阻擋 aborted、active-referenced、漂移、symlink、特殊檔案及其他非精確候選。",
-        "evidence_sha256": "00111a18d86ee768b63f1ada08f8d59def49e95c8654680bf342756a6be1e798"
+        "rationale_summary": "Label B records direct absence of the eval-bind verifier and transcript-binding path required by the contract, so the session-to-commitment binding is not implemented.",
+        "evidence_sha256": "91c33877c9525b9624edca512746821a07191c9bcf2f2011fb7a5a5396237fc7"
       }
     },
     {
-      "id": "candidate-does-not-self-approve",
+      "id": "binds-platform-validation-sessions",
       "label_a": {
         "verdict": "pass",
-        "rationale_summary": "維持穩定控制器的審核與批准權，明確禁止候選機制自行批准發布及相關操作。",
-        "evidence_sha256": "5c89de1d32caec3bb999b8c9be17adf02d9ce0ed400acc3f14966ab2b52c382d"
+        "rationale_summary": "Label A records controller-signed challenge and completion evidence that binds provider runtime, execution profile, environment commitment, prompt template, installed copy, transcript identity, and provider session nonces, with replay validation from live files and raw transcripts.",
+        "evidence_sha256": "d2e07b6fe7bb65a1e386edf7586ba9437167a50b0a61fb112159ca094a6629ed"
       },
       "label_b": {
-        "verdict": "pass",
-        "rationale_summary": "明確由目前穩定控制器掌握 gate，候選保持隔離且不得自行批准。",
-        "evidence_sha256": "1aed3047e43fa91987d193135c3e797d098c940bb191da94ba09fb868899cbc6"
-      }
-    },
-    {
-      "id": "cleanup-attempt-precedes-quarantine-delete",
-      "label_a": {
-        "verdict": "pass",
-        "rationale_summary": "要求 mutation 前持久化一次性 attempt，同檔案系統原子 quarantine，驗證後僅刪除 quarantine 目標。",
-        "evidence_sha256": "0240b567b2d13272b93b599d33e51b55e8c9d6c76781b31e836d427303cba0c3"
-      },
-      "label_b": {
-        "verdict": "pass",
-        "rationale_summary": "完整描述一次性 attempt、同檔案系統原子隔離、manifest 複核及只刪除隔離目錄。",
-        "evidence_sha256": "61f2a99ef05a7f0d59892be8ff5123455871eee2c9e84061493850ba7984f5be"
-      }
-    },
-    {
-      "id": "cleanup-exact-candidate-only",
-      "label_a": {
         "verdict": "fail",
-        "rationale_summary": "目前雖阻擋 source clone，但將原因表述為證明不足，並暗示補證後可能納入，未建立 source clone 永遠排除的精確候選限定。",
-        "evidence_sha256": "da7c0032421ec831b8be517511941c88965b0166e3b08469c59e201961ce6215"
-      },
-      "label_b": {
-        "verdict": "pass",
-        "rationale_summary": "只允許精確完成 run 的直接子候選，並明確排除 source clone、父目錄、run state、raw evaluation 與相鄰候選。",
-        "evidence_sha256": "346c2f94821bce77ca26c1af4921addca7fc572467a0edb54a8826bf9bf391d8"
+        "rationale_summary": "Label B records absence of the controller and session machinery required to bind platform validation sessions to the evaluated artifact.",
+        "evidence_sha256": "43bda7f20fc3fffa9f8f09f33674fe46a5a15da34221175a45e503fbf8d9cf54"
       }
     },
     {
-      "id": "cleanup-reconcile-does-not-replay",
+      "id": "binds-publication-to-head-commit-tree",
       "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records publication preflight that binds candidate identity to immutable commit-tree data and exact file-level hashes instead of a mutable working tree.",
+        "evidence_sha256": "c1e7cd8bc46dc5d93f0b59312173c1104468723ecf83bb09120f2720903cef72"
+      },
+      "label_b": {
         "verdict": "fail",
-        "rationale_summary": "禁止盲目重試，但 reconcile 分類未採用要求的 pending/applied 語義，也未清楚限定只能完成同一已 quarantine 的交易。",
-        "evidence_sha256": "b538c02b6a04ae2e6cd2c597ce276f0866d34bed2092c92650075ce551f7d8bb"
-      },
-      "label_b": {
-        "verdict": "pass",
-        "rationale_summary": "明確禁止重跑 apply，依原位置與 quarantine 狀態分類，且 pending 僅能續做同一交易。",
-        "evidence_sha256": "e662e0ad63f5edf0d5897ed97cf21ffa3808e52ceee6db37506391c8eeaaf241"
+        "rationale_summary": "Label B records no publication gate that rebinds publication to the contract's exact head-commit tree, fixture raw hash, and per-target hashes.",
+        "evidence_sha256": "d40bbbab10fba6afb3866cd41733572285fc13fbe551c3421906cfd3bec25153"
       }
     },
     {
-      "id": "independent-pre-unblind-judge-required",
+      "id": "binds-snapshot-to-locked-fixture",
       "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a binding path that requires both repo-relative fixture path and raw fixture hash in the snapshot and then rereads that exact regular file for raw and parsed equality.",
+        "evidence_sha256": "49a9310fa790d5bd69c8df99da1ac1cdf743dba6c8a5f675b7f419f41a1a9aea"
+      },
+      "label_b": {
         "verdict": "fail",
-        "rationale_summary": "要求獨立 Judge、不同 generator sessions 與解盲時序，但未明確要求隨機化 A/B labels，逐行為 verdict schema 也不完整。",
-        "evidence_sha256": "7f6630a020c07674230af48fde5e0792b8bbecc0fef1239bfbddd68ea44681ab"
-      },
-      "label_b": {
-        "verdict": "pass",
-        "rationale_summary": "完整要求預先隨機 A/B assignment、三個不同 session、逐行為裁決與 evidence hash，且須在解盲前完成。",
-        "evidence_sha256": "4be96358e6845e486f12196384cef01899269c36341f23ab0487be74dfc346f7"
+        "rationale_summary": "Label B records fixture content use, but not snapshot locking of repo-relative fixture path plus raw SHA followed by live reread during eval binding.",
+        "evidence_sha256": "a9281f7311705879ddc586a47bc1ec20061927b063b85a2711fe90bc089c2e89"
       }
     },
     {
-      "id": "measurement-and-aggregate-are-derived",
+      "id": "binds-target-skill-name-and-path",
       "label_a": {
         "verdict": "pass",
-        "rationale_summary": "拒絕人工布林摘要作 gate，要求由本機 raw outputs/events 重算指標並以證據指紋支撐統計與門檻。",
-        "evidence_sha256": "da4456432ea55771dcdf2d92f4040f4ecd0d31434a119b0a49b0c17e910672c3"
+        "rationale_summary": "Label A records target identity pinned to a normalized repository-relative skill path and unique frontmatter skill name, with repeated checks across validation, transition, continuation, and update flows.",
+        "evidence_sha256": "e74c7b96d23fde265bf534ef45f387c99faa19cc25f6ec47412bc46a5adcedd9"
       },
       "label_b": {
-        "verdict": "pass",
-        "rationale_summary": "明確要求 measurement document 從本機來源推導，並由綁定 adjudication/measurement 指紋的 aggregate 重新計算結果。",
-        "evidence_sha256": "9d7359ebadcd5b850daefc59ffad791736240c8287c28afc72b388ae9909e7b2"
+        "verdict": "fail",
+        "rationale_summary": "Label B records no eval-binding or publication-binding path that locks target name and path through snapshot and transition or apply flow.",
+        "evidence_sha256": "d420072c7731b20d6a69cebf721ea065114724f2546c96137739da7cc937f2e4"
       }
     },
     {
-      "id": "terminal-source-run-remains-byte-stable",
+      "id": "blocks-rederived-forged-target-hash",
       "label_a": {
         "verdict": "pass",
-        "rationale_summary": "明確保持 terminal source run 不可變，並把 preview、approval、attempt、quarantine、proof 與 reconciliation 放入獨立交易。",
-        "evidence_sha256": "971d0dc1514ed2cef588832371baeab5d7e104fa65a855a5258e70aae373f030"
+        "rationale_summary": "Label A records live candidate-tree rereads, before-and-after tree identity checks, regular-file enforcement, and per-target hash verification against locked values, which blocks forged rederivation.",
+        "evidence_sha256": "b462b56488df3ae10563d68ee91db9589db9bdb2fc2e3ec77132695386cf665a"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records no contract-compliant live candidate-root verifier, and even the mandated runtime observation cannot complete.",
+        "evidence_sha256": "1a4b92125a055a12073aab657cafbeb6d2aec2ac96561e9d236be105e35120d0"
+      }
+    },
+    {
+      "id": "bounds-legacy-to-terminal-release-continuation",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a narrow legacy continuation path limited to terminal completed runs with binding match, fresh merge verification, and preserved candidate identity, without reopening earlier publication phases generically.",
+        "evidence_sha256": "76665f157e7bc0b06cf8f2b69257a2e6c992dcee71e34132de420e3f3a7d385d"
       },
       "label_b": {
         "verdict": "pass",
-        "rationale_summary": "明確要求 terminal source run byte-for-byte 不變，所有清理狀態由獨立版本化交易持有。",
-        "evidence_sha256": "282003316527f6f75c166e91ae08c833f7c393a398770b40cb5b44ae68658d4b"
+        "rationale_summary": "Label B records a continuation path tightly limited to terminal completed runs, with separate legacy recovery that revalidates candidate, PR, and merge evidence before creating a new continuation run.",
+        "evidence_sha256": "3ebf429780e6c1ab6d3316a9c8a5f004840ea55029766d2c386dc64c5959c8d4"
+      }
+    },
+    {
+      "id": "bounds-measurement-before-judging",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records explicit checking that measurement time lies between the later generator completion and the judge start time, with replay validation of the same bound.",
+        "evidence_sha256": "ff4f639b2577cc2ad2148c67b9860a53e8322e89adae0509094eede2ef4b8066"
+      },
+      "label_b": {
+        "verdict": "insufficient_evidence",
+        "rationale_summary": "Label B records timing checks around generator completion and judge start, but the recorded evidence does not clearly show the contract's required measured_at interval check and replay of that same interval.",
+        "evidence_sha256": "3197b0574b83d142820dd425294b34c1ff29408b39121b85cb063a47f465c714"
+      }
+    },
+    {
+      "id": "continuation-cannot-reenter-merge",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a direct transition guard that rejects merge reentry for continuation runs before approval consumption or state mutation.",
+        "evidence_sha256": "7a38150bc3bb1eaac89eb1e181d71628cac551ef28699d1c16525e607d3199b2"
+      },
+      "label_b": {
+        "verdict": "insufficient_evidence",
+        "rationale_summary": "Label B records bounded continuation creation from a completed source, but the recorded evidence does not clearly show a transition-path rejection of nextPhase merge before approval consumption or state mutation.",
+        "evidence_sha256": "012aeb357214079300a7f5b003ff7f647a562036ecd5a54e5d576f48771f0ef8"
+      }
+    },
+    {
+      "id": "exposes-runtime-eval-bind-contract",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records that the shipped CLI actually registers eval-bind and that the required smoke reaches the missing-argument boundary rather than failing to load.",
+        "evidence_sha256": "6751110c78f53eb2e086b5ea921b3a2308bd292a10dce67d16e18d7a49deee31"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records absence of the eval-bind command required by the benchmark.",
+        "evidence_sha256": "fcce103e11e95843b50a6ec9b2ebfa82dd51404cb1cf977bf52645cd8f16e5d3"
+      }
+    },
+    {
+      "id": "includes-mode-and-node-modules-in-tree-identity",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a tree-identity algorithm built from flattened full paths in byte-stable order, including file modes and tracked node_modules, while rejecting symlinks and special entries across live and commit-backed paths.",
+        "evidence_sha256": "b52626c443995b8c50b7801d89c140407b7720e247ed839db4b0cf199ea18747"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records a tree fingerprint that omits node_modules and file modes and does not meet the contract's live runtime identity behavior.",
+        "evidence_sha256": "982a3231c5ba6bad6fb28eb11ff0104afbcb4517e9a20d790e75e5c0b1fb6db6"
+      }
+    },
+    {
+      "id": "keeps-binding-analysis-read-only",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records evaluation binding and verification code that reconstructs and validates evidence without creating approvals, mutating lifecycle state, writing Git or GitHub state, or updating installations.",
+        "evidence_sha256": "486ab8f606e4e779f931dccdb38c223e91fd1912e2eeb1e061ba6763f91c4a6a"
+      },
+      "label_b": {
+        "verdict": "insufficient_evidence",
+        "rationale_summary": "Label B records read-only behavior in inspected evaluation helpers, but the benchmark-specific eval-bind analysis path is absent, so the exact contract path is not directly demonstrated.",
+        "evidence_sha256": "cbdaa0ab69147a2168ce3ba946d2c77f0da40c170e78df97809cefed5b901c98"
+      }
+    },
+    {
+      "id": "keeps-evaluation-input-views-label-neutral",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a locked fixture validator and blinded view construction that preserve opaque labels, omit candidate identity from prompts, and bind sessions and outputs to exact role-view hashes.",
+        "evidence_sha256": "c0a9c1e0e3dc27712f37a15020f82cc50509ce3823e5644cee8e2a3f97b69f4b"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records blinded A/B adjudication, but not the contract's generator-view and judge-view commitment model with per-view hashes and opaque runtime commitments.",
+        "evidence_sha256": "12b4fb62b55e6e1d705965f7527fef6b5f63de76cbdab064ad73924690a6c140"
+      }
+    },
+    {
+      "id": "requires-exact-source-rederivation",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a forward binding accepted only when every public artifact and private-source manifest can be recomputed exactly from locked raw sources, live fixture and controller bytes, and captured platform outputs.",
+        "evidence_sha256": "851d92b1e766de7e7c1edb40aca094d4115b20e79131b8e52be03131bfcb3eee"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records derivation of some blinded public summaries, but not exact rederivation of the contract's full binding package from locked private sources and captured platform outputs.",
+        "evidence_sha256": "e1be36d92b5a2ca8e6eba7621aa264cb14d1a07dc2d4d42657057ecac2f3aee3"
+      }
+    },
+    {
+      "id": "requires-pr-ready-exact-binding",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a PR-ready gate that requires a rebuilt validation result with exactly one passed forward check whose details are a current exact forward-evaluation binding.",
+        "evidence_sha256": "bc040e3012434c3f576e932a50daf9fc470dd9000b6f60c8bad17deadd8fd0e2"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records PR-readiness logic for its own lifecycle, but not the benchmark's exact binding gate over blinded forward results and fixture identity.",
+        "evidence_sha256": "fc96d66a5ca055a46e07331b6203d76e22b887f0bca73626b090cf4f0f072415"
+      }
+    },
+    {
+      "id": "revalidates-final-skill-before-push-transition",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records that before branch-push or publish-pr transition consumes approvals or mutates phase, the runtime revalidates live candidate state against approved preview, candidate snapshot, PR-ready forward binding, and current local branch-push state.",
+        "evidence_sha256": "a3f4f0f1589355ce972612ca52a573c67b427fbfaa8975a3b14d7be09025eef3"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records lifecycle revalidation of some candidate and proof state, but not the contract's final-skill snapshot and target-file revalidation bundle before push transition and apply.",
+        "evidence_sha256": "3a76eb4dc5b8c7be3c35a1c25e415ffb371e6923e23be9e63cac31da7fc09fc3"
+      }
+    },
+    {
+      "id": "scans-tracked-node-modules-for-disclosure",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records disclosure scanning keyed from tracked repository paths and a public-text traversal that preserves tracked node_modules content while skipping untracked dependency cache.",
+        "evidence_sha256": "67b9884b0ad2cbfba680887112ccc759c18ab7e7614985dcaf6ad7671220d67a"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records a publication validator that ignores node_modules during content walks, so tracked node_modules disclosure scanning is not implemented.",
+        "evidence_sha256": "d906be701e6523415fbbd4a6d55f250464dbe2cef8603f92394a82d8b6662701"
+      }
+    },
+    {
+      "id": "supplies-complete-callable-runtime-bundles",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a complete supplied skill tree whose required runtime observation and eval-bind smoke both execute to the contract boundary.",
+        "evidence_sha256": "e2c33ccce08b4dd1075b3881171120544ef86d1922e7041ea1b7806a0f365e1a"
+      },
+      "label_b": {
+        "verdict": "fail",
+        "rationale_summary": "Label B records a runtime that cannot reproduce the required callable bundle because both mandatory benchmark commands fail.",
+        "evidence_sha256": "20cb553d6859d615ea6b3af7d5f0119c149273b200939036afcddf8afc7b3c0c"
+      }
+    },
+    {
+      "id": "terminal-transition-cannot-cross-inflight-github-apply",
+      "label_a": {
+        "verdict": "pass",
+        "rationale_summary": "Label A records a lifecycle guard that blocks movement while unmatched GitHub action attempts remain unresolved and requires reconciliation before later transitions proceed.",
+        "evidence_sha256": "091e0cf311d4a14527d87685ce5a9a03088a2e1a65020dbe639ddd1dab8acc94"
+      },
+      "label_b": {
+        "verdict": "insufficient_evidence",
+        "rationale_summary": "Label B records reservation and retry protections around GitHub apply, but the recorded evidence does not clearly establish the contract's full all-transitions guard on unmatched attempts before any lifecycle mutation.",
+        "evidence_sha256": "3c09e28741cb3aa221a27ea37717331ad9d7bb1959c6a3c5e095910fd461ec12"
       }
     }
   ],
   "quality": {
     "false_positive_optimizations": 0,
-    "rationale_summary": "兩份輸出均未產生 OPT-*，也未把不具證據的額外最佳化宣稱包裝為已驗證改善。",
-    "evidence_sha256": "98a22cd6acc2c064836c5e711b5ca440402bf6db84ac997a0723608c34728a56"
+    "rationale_summary": "The recorded clause evidence supports accepting Label A's pass findings across the locked behaviors. For Label B, several recorded fail findings are supported directly by missing eval-bind, missing controller evidence, and missing target-binding paths, while three originally overstrong pass findings are reduced to insufficient evidence because the recorded clauses do not clearly show the contract's exact transition or measured_at checks.",
+    "evidence_sha256": "b478167efa399088d6ae1633a51187bb2e08df7a9fd5e8a66312cfcced23e16c"
   },
   "derivation": {
     "builder": "agent-skill-maintainer/blinded-adjudication-v1",
