@@ -304,6 +304,8 @@ node skills/agent-skill-maintainer/scripts/maintainer.mjs cleanup-reconcile \
 
 候選已在隔離專案通過 Codex CLI `0.139.0` 與 Claude Code `2.1.220` 的安裝、正向觸發、負向不觸發、Provider 選擇、產物橋接、fallback、穩定 ID、決策邊界及零檔案修改檢查。
 
+簽署 neutral evaluator 證據需要 Node.js 能從檔案系統驗證外部私鑰是 owner-only regular file。控制器在 Windows 會 fail closed，不會放寬這項要求；因此 Windows CI 執行可攜式合同子集與明確的私鑰拒絕檢查，排除依賴簽署 evaluator 的案例，以及載入模組時就物化這類 fixture 的 state 測試；Ubuntu 與 macOS 則執行完整套件。
+
 正式命令合同固定為 Superpowers `v6.2.0`、Spec Kit `v0.14.2`、OpenSpec `v1.6.0`、BMAD Method `v6.10.0` 與 Matt Pocock Skills `v1.1.0`。只有 Profile allowlist 內的命令可以使用，且必須同時存在具體能力缺口、唯一產物 owner、精確版本偵測，並對副作用另行確認。已封存的 GSD `v1.42.3` 保留為 legacy，永不授權命令。未知版本仍只允許唯讀相容，未安裝則標示 unavailable。
 
 ## 授權

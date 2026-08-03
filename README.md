@@ -309,6 +309,8 @@ The stable contract targets GitHub repositories and Agent Skills. GitLab, Bitbuc
 
 The candidate passed isolated project installation, positive triggering, negative non-triggering, Provider selection, artifact bridging, fallback, stable-ID, decision-boundary, and no-file-mutation checks on Codex CLI `0.139.0` and Claude Code `2.1.220`.
 
+Signed neutral-evaluator evidence generation requires a filesystem where Node.js can verify owner-only regular-file permissions for the external private key. The controller fails closed on Windows instead of weakening that requirement. Windows CI therefore runs the portable contract subset plus an explicit private-key rejection check, excluding signed-evaluator cases and state fixtures that materialize them at module load; Ubuntu and macOS run the complete suite.
+
 Formal command-scoped Profiles are fixed to Superpowers `v6.2.0`, Spec Kit `v0.14.2`, OpenSpec `v1.6.0`, BMAD Method `v6.10.0`, and Matt Pocock Skills `v1.1.0`. Only each Profile's allowlisted commands may be used, and only after a concrete capability gap, unique artifact owner, exact-version detection, and separate confirmation of side effects. The archived GSD `v1.42.3` remains legacy and command-disabled. Unknown versions remain read-only; missing Providers are unavailable.
 
 ## License
