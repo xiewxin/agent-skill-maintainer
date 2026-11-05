@@ -1,5 +1,10 @@
 # Agent Skill Maintainer
 
+> **Maintenance discontinued — 2026-11-05.**
+> This project is no longer actively maintained. The source, tests, and release history are retained for reference; no further features, fixes, or dependency updates are planned.
+> The workflow is intended for evidence-heavy Skill maintenance, and its process overhead can exceed the value of small changes. New adoption is not recommended without an independent assessment of that cost.
+> The capability and validation statements below describe historical versions and their recorded environments. They do not establish compatibility with current agents, models, or Provider versions.
+
 **Your Agent Skill ran. Something went wrong. Turn that real usage into a tested, release-ready improvement.**
 
 Agent Skill Maintainer reviews what actually happened in a task—not just what a Skill claims to do. It separates reusable Skill defects from one-off preferences or external failures, proposes the smallest justified change, implements approved improvements in isolation, and verifies them before any publication step.
